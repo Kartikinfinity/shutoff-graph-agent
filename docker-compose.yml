@@ -1,0 +1,14 @@
+services:
+  falkordb:
+    # Tested with graph module v4.22.1 (image digest below). Use falkordb/falkordb:latest to get the newest.
+    image: falkordb/falkordb@sha256:b0bdcac2cbaff989e77cb0610439b7a9289e86de033ccbbd4368b66fb680ae7a
+    container_name: shutoff-falkordb
+    ports:
+      - "6379:6379"   # database
+      - "3000:3000"   # FalkorDB Browser UI
+    volumes:
+      - falkordb-data:/var/lib/falkordb/data
+    restart: unless-stopped
+
+volumes:
+  falkordb-data:

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "shutoff",
+      "runtimeExecutable": "D:/graph hacks/.venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "shutoff.api:app", "--port", "8000"],
+      "port": 8000
+    }
+  ]
+}

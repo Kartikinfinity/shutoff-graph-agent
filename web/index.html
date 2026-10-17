@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ShutOff · Main Break Isolation</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5c3.6 4.4 6 7.9 6 11a6 6 0 0 1-12 0c0-3.1 2.4-6.6 6-11z" fill="currentColor"/><rect x="5" y="12.2" width="14" height="2.6" rx="1.3" fill="#fff"/></svg>
+      <div>
+        <h1>ShutOff</h1>
+        <p>Main-break isolation agent · Riverbend Water</p>
+      </div>
+    </div>
+    <div class="badges">
+      <span class="badge warn" title="Every pipe, valve, customer and incident here is invented.">Synthetic network</span>
+      <span class="badge" id="mode-badge">…</span>
+      <span class="badge" id="db-badge">FalkorDB …</span>
+      <button class="ghost" id="reset-btn" title="Reload the synthetic network and clear all field reports">Reset demo</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel chat" aria-label="Incident conversation">
+      <div class="panel-head"><h2>Incident line</h2><span class="hint">dispatcher · crews · supervisor</span></div>
+      <div id="log" class="log" aria-live="polite"></div>
+      <div class="chips" id="chips">
+        <button data-msg="Caller reports water gushing on Maple St between 2nd and 3rd Ave">Report break on Maple St</button>
+        <button data-msg="Crew wants to just close V-212 and V-213, is that enough?">Check crew's 2-valve plan</button>
+        <button data-msg="Crew: V-265 won't turn, it's seized">V-265 is seized</button>
+        <button data-msg="Is the hospital still supplied?">Hospital supplied?</button>
+        <button data-msg="Which valves should we exercise first?">Valves to exercise</button>
+        <button data-msg="Burst main on Elm St at 5th">Unknown street</button>
+      </div>
+      <form id="composer" class="composer">
+        <input id="input" autocomplete="off" maxlength="500" placeholder="Describe the break, a crew report, or a question…" aria-label="Message">
+        <button type="submit" class="primary">Send</button>
+      </form>
+    </section>
+
+    <section class="panel mapwrap" aria-label="Network map">
+      <div class="panel-head">
+        <h2>Network</h2>
+        <div class="legend">
+          <span><i class="sw main"></i>in service</span>
+          <span><i class="sw seg"></i>shut off (segment)</span>
+          <span><i class="sw cut"></i>cut off (unintended)</span>
+          <span><i class="sw path"></i>supply path</span>
+          <span><i class="sw leak"></i>leak path</span>
+          <span><i class="vk open"></i>valve</span>
+          <span><i class="vk toclose"></i>to close</span>
+          <span><i class="vk closed"></i>closed</span>
+          <span><i class="vk seized"></i>seized</span>
+        </div>
+      </div>
+      <div class="mapbox">
+        <svg id="map" viewBox="-30 40 1200 640" role="img" aria-label="Riverbend water network map"></svg>
+        <div id="tip" class="tip" hidden></div>
+      </div>
+      <div id="wo-bar" class="wo-bar"></div>
+    </section>
+
+    <section class="panel side" aria-label="Plan and evidence">
+      <div class="panel-head"><h2>Isolation plan</h2></div>
+      <div id="plan" class="plan empty">No active break. Report one on the incident line.</div>
+      <div class="panel-head sub"><h2>Graph evidence</h2><span class="hint">every query the agent ran</span></div>
+      <div id="evidence" class="evidence"><p class="muted">Tool calls and Cypher appear here.</p></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

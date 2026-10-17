@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+*.webm
+demo/raw/
+
+# Not part of the submission
+Past WeMakeDevs Hackathons & Winning Projects.pdf
