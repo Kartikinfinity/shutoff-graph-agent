@@ -92,7 +92,13 @@ def issue_work_order(args: dict) -> dict:
     if args.get("confirmed_by_human") is not True:
         return {"outcome": "refused", "reason": "A human must confirm before valves are closed."}
     valves = [_valve(v) for v in (args.get("valve_ids") or [])][:12]
-    return N.issue_work_order(_pipe(args["pipe_id"]), valves, _text(args.get("report"), 300))
+    ack = [_text(c, 20) for c in (args.get("acknowledge_critical") or [])][:10]
+    expected = None
+    if args.get("expected_accounts_out") is not None:
+        expected = {"accounts_out": int(args["expected_accounts_out"]),
+                    "critical_ids": [_text(c, 20) for c in (args.get("expected_critical_ids") or [])]}
+    return N.issue_work_order(_pipe(args["pipe_id"]), valves, _text(args.get("report"), 300),
+                              expected=expected, acknowledge_critical=ack)
 
 
 def restore_service(args: dict) -> dict:
@@ -170,12 +176,19 @@ TOOLS: dict[str, dict] = {
         "human_gated": True,
         "description": ("Commit a shutdown: closes the listed valves in the graph, opens an Incident and a "
                         "WorkOrder, and records notices (dispatch and notices are simulated). Re-simulates "
-                        "first and refuses unless the break is isolated. Requires confirmed_by_human=true."),
+                        "first and refuses unless the break is isolated. Requires confirmed_by_human=true. If the "
+                        "closures cut off critical customers, acknowledge_critical must list exactly their ids. "
+                        "Pass expected_accounts_out / expected_critical_ids from the plan the human saw, and the "
+                        "server refuses if the impact has changed since."),
         "schema": _schema({
             "pipe_id": {"type": "string"},
             "valve_ids": {"type": "array", "items": {"type": "string"}},
             "report": {"type": "string"},
             "confirmed_by_human": {"type": "boolean"},
+            "acknowledge_critical": {"type": "array", "items": {"type": "string"},
+                                     "description": "Customer ids of critical customers the human accepts will lose water."},
+            "expected_accounts_out": {"type": "integer"},
+            "expected_critical_ids": {"type": "array", "items": {"type": "string"}},
         }, ["pipe_id", "valve_ids", "confirmed_by_human"]),
     },
     "restore_service": {

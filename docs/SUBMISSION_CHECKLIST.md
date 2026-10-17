@@ -20,7 +20,7 @@ Rules to double-check:
 
 Before you submit:
 
-- [ ] `docker compose up -d`, `python -m shutoff.seed`, `python -m pytest -q` all pass on your machine
+- [ ] `docker compose up -d`, `python -m shutoff.seed`, `python -m pytest -q` (40 tests) all pass on your machine
 - [ ] Run the demo once yourself in the browser (http://localhost:8000)
 - [ ] Watch the demo video end to end
 - [ ] Optional: blog post for the AirPods side prize (write it in your own words)

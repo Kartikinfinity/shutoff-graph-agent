@@ -143,6 +143,8 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 table.cont { width: 100%; border-collapse: collapse; font-size: 12px; }
 table.cont th, table.cont td { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .approve { width: 100%; margin-top: 12px; padding: 10px; font-size: 14px; }
+.ack { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; padding: 8px 10px; border: 1px solid #f3c0c0; background: var(--red-bg); border-radius: 8px; font-size: 13px; color: #7f1d1d; cursor: pointer; }
+.ack input { margin-top: 3px; }
 .approve-note { font-size: 11px; color: var(--muted); margin-top: 4px; }
 
 /* evidence */

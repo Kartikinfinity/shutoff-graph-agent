@@ -10,6 +10,7 @@ simulation itself instead of trusting whoever called it.
 from __future__ import annotations
 
 import re
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -121,6 +122,20 @@ def customers_on(pipes: list[str]) -> list[dict]:
     return dbm.run("customers_on_pipes", Q.CUSTOMERS_ON_PIPES, {"pipes": pipes})
 
 
+def _copy_with_retry(name: str, attempts: int = 60, wait_s: float = 0.05) -> None:
+    """GRAPH.COPY forks the server. Redis allows one child process at a time, so a
+    copy that lands while an automatic background save (BGSAVE) is running fails
+    with "could not fork". That window lasts milliseconds: wait and retry."""
+    for i in range(attempts):
+        try:
+            dbm.graph().copy(name)
+            return
+        except Exception as e:
+            if "fork" not in str(e).lower() or i == attempts - 1:
+                raise
+            time.sleep(wait_s)
+
+
 @contextmanager
 def sandbox():
     """A throwaway GRAPH.COPY of the live network."""
@@ -128,7 +143,7 @@ def sandbox():
     t = dbm.current_trace()
     if t is not None:
         t.queries.append(dbm.QueryRecord("sandbox_copy", f"GRAPH.COPY {dbm.GRAPH} {name}", {}, 0, 0, dbm.GRAPH))
-    dbm.graph().copy(name)
+    _copy_with_retry(name)
     try:
         yield name
     finally:
@@ -139,12 +154,18 @@ def sandbox():
 
 
 def simulate(close: list[str], break_pipe: str | None = None, segment_pipes: list[str] | None = None) -> dict:
-    """Close `close` (plus anything already closed) on a sandbox copy and report
-    what happens: is the break still fed, who loses water, are critical
-    customers still supplied (with the path that proves it)."""
+    """Close `close` on a sandbox copy and report what happens: is the break
+    still fed, who loses water *because of these closures*, are critical
+    customers still supplied (with the path that proves it).
+
+    Valves already closed (other work orders) are applied first and measured as
+    a baseline, so outages caused by other work orders are reported separately
+    instead of being counted against this plan."""
     segment_pipes = segment_pipes or []
     with sandbox() as sb:
-        dbm.run("sim_apply_closures", Q.SIM_APPLY_CLOSURES, {"close": close}, write=True, graph_name=sb)
+        dbm.run("sim_delete_closed", Q.SIM_DELETE_CLOSED, write=True, graph_name=sb)
+        baseline = {r["pipe"] for r in dbm.run("sim_dry_pipes", Q.SIM_DRY_PIPES, graph_name=sb)}
+        dbm.run("sim_delete_valves", Q.SIM_DELETE_VALVES, {"close": close}, write=True, graph_name=sb)
         dry = {r["pipe"] for r in dbm.run("sim_dry_pipes", Q.SIM_DRY_PIPES, graph_name=sb)}
         leak_path = None
         if break_pipe and break_pipe not in dry:
@@ -154,22 +175,26 @@ def simulate(close: list[str], break_pipe: str | None = None, segment_pipes: lis
         critical_status = []
         for c in critical:
             if c["pipe"] in dry:
-                critical_status.append({**c, "supplied": False})
+                critical_status.append({**c, "supplied": False, "already_out": c["pipe"] in baseline})
             else:
                 rows = dbm.run("sim_supply_path", Q.SIM_SUPPLY_PATH, {"target": c["pipe"]}, graph_name=sb)
                 critical_status.append({**c, "supplied": bool(rows), "path": rows[0] if rows else None})
-    out = customers_on(sorted(dry))
+    new_dry = dry - baseline
+    out = customers_on(sorted(new_dry))
+    already = customers_on(sorted(baseline))
     intended = [c for c in out if c["pipe"] in segment_pipes]
     unintended = [c for c in out if c["pipe"] not in segment_pipes]
     return {
         "isolated": break_pipe in dry if break_pipe else None,
         "leak_path": leak_path,
-        "dry_pipes": sorted(dry),
+        "dry_pipes": sorted(new_dry),
         "accounts_out": sum(c["accounts"] for c in out),
         "intended": intended,
         "unintended": unintended,
         "critical_out": [c for c in out if c["critical"]],
         "critical_status": critical_status,
+        "already_out_accounts": sum(c["accounts"] for c in already),
+        "already_dry_pipes": sorted(baseline),
     }
 
 
@@ -256,11 +281,17 @@ def report_valve(valve_id: str, condition: str, note: str = "") -> dict:
     return {"outcome": "recorded", "valve": valve_id, "location": v["location"], "condition": condition}
 
 
-def issue_work_order(pipe_id: str, valve_ids: list[str], report: str = "") -> dict:
+def issue_work_order(pipe_id: str, valve_ids: list[str], report: str = "",
+                     expected: dict | None = None, acknowledge_critical: list[str] | None = None) -> dict:
     """Commit a shutdown. Re-simulates first and refuses anything that does not
-    isolate the break or relies on a valve recorded as seized."""
+    isolate the break, relies on a seized valve, has a different impact from
+    the one the approver was shown (`expected`), or cuts off a critical
+    customer the approver did not explicitly acknowledge."""
+    valve_ids = list(dict.fromkeys(valve_ids))  # de-duplicate, keep order
     if not pipe_info(pipe_id):
         return {"outcome": "refused", "reason": f"Pipe {pipe_id} is not in the graph."}
+    if not valve_ids:
+        return {"outcome": "refused", "reason": "No valves to close."}
     bad = []
     for vid in valve_ids:
         v = valve_info(vid)
@@ -275,6 +306,21 @@ def issue_work_order(pipe_id: str, valve_ids: list[str], report: str = "") -> di
     if not sim["isolated"]:
         return {"outcome": "refused", "reason": "Simulation shows the break would still be fed.",
                 "leak_path": sim["leak_path"]}
+    critical = sorted({c["id"]: c["name"] for c in sim["critical_out"]}.items())
+    critical_ids = [cid for cid, _ in critical]
+    if expected is not None:
+        was = (expected.get("accounts_out"), sorted(expected.get("critical_ids") or []))
+        now_ = (sim["accounts_out"], critical_ids)
+        if was != now_:
+            return {"outcome": "refused", "stale": True,
+                    "reason": (f"The impact changed since the plan was shown (was {was[0]} accounts, critical "
+                               f"{was[1] or 'none'}; now {now_[0]} accounts, critical {now_[1] or 'none'}). "
+                               "Re-plan before approving.")}
+    if critical_ids and sorted(set(acknowledge_critical or [])) != critical_ids:
+        return {"outcome": "needs_acknowledgement",
+                "critical": [{"id": cid, "name": name} for cid, name in critical],
+                "reason": ("This plan cuts off critical customer(s): " + ", ".join(n for _, n in critical) +
+                           ". The approver must acknowledge each one before valves are closed.")}
     n = dbm.run("count_work_orders", Q.COUNT_WORK_ORDERS)[0]["n"] + 1
     wo, inc, at = f"WO-{1000 + n}", f"INC-{datetime.now().year}-{900 + n}", now()
     dbm.run("create_work_order", Q.CREATE_WORK_ORDER, {
@@ -289,16 +335,48 @@ def issue_work_order(pipe_id: str, valve_ids: list[str], report: str = "") -> di
         "outcome": "issued", "work_order": wo, "incident": inc, "pipe": pipe_id, "close_sequence": valve_ids,
         "accounts_out": sim["accounts_out"],
         "priority_notices": [c["name"] for c in sim["critical_out"]],
+        "acknowledged_critical": critical_ids,
         "standard_notices": len([n for n in notices if n["priority"] == "standard"]),
         "dispatch": "simulated: no crew is paged and no message is sent",
     }
 
 
 def restore_work_order(wo: str) -> dict:
-    rows = dbm.run("restore_work_order", Q.RESTORE_WORK_ORDER, {"wo": wo, "at": now()}, write=True)
+    """Re-open a work order's valves, but only those no other active work order
+    still needs. Each valve is re-opened on a sandbox first; if that would re-feed
+    another active break, it stays closed and the dependent work order takes it over."""
+    rows = dbm.run("work_order_by_id", Q.WORK_ORDER_BY_ID, {"wo": wo})
     if not rows:
         return {"outcome": "not_in_graph", "reason": f"Work order {wo} not found."}
-    return {"outcome": "restored", "work_order": wo, "incident": rows[0]["incident"]}
+    if rows[0]["status"] != "issued":
+        return {"outcome": "refused", "reason": f"{wo} is already {rows[0]['status']}."}
+    others = [w for w in open_work_orders() if w["id"] != wo]
+    reopen: list[str] = []
+    kept: list[dict] = []
+    with sandbox() as sb:
+        for v in sorted(set(rows[0]["valves"])):
+            holders = [w["id"] for w in others if v in w["valves"]]
+            if holders:
+                kept.append({"valve": v, "held_by": holders, "reason": "also closed by another work order"})
+                continue
+            dbm.run("sim_set_open", Q.SIM_SET_OPEN, {"ids": [v]}, write=True, graph_name=sb)
+            dry = {r["pipe"] for r in dbm.run("sim_dry_pipes_by_label", Q.SIM_DRY_PIPES_BY_LABEL, graph_name=sb)}
+            refed = [w["id"] for w in others if w["pipe"] not in dry]
+            if refed:
+                dbm.run("sim_unset_open", Q.SIM_UNSET_OPEN, {"ids": [v]}, write=True, graph_name=sb)
+                kept.append({"valve": v, "held_by": refed, "reason": "re-opening it would re-feed another active break"})
+            else:
+                reopen.append(v)
+    if reopen:
+        dbm.run("reopen_valves", Q.REOPEN_VALVES, {"ids": reopen}, write=True)
+    for k in kept:
+        if k["reason"].startswith("re-opening"):
+            for holder in k["held_by"]:
+                dbm.run("transfer_hold", Q.TRANSFER_HOLD, {"to": holder, "valve": k["valve"], "from": wo}, write=True)
+    done = dbm.run("close_out_work_order", Q.CLOSE_OUT_WORK_ORDER,
+                   {"wo": wo, "at": now(), "kept": [k["valve"] for k in kept]}, write=True)
+    return {"outcome": "restored", "work_order": wo, "incident": done[0]["incident"] if done else rows[0]["incident"],
+            "reopened": reopen, "kept_closed": kept}
 
 
 def open_work_orders() -> list[dict]:

@@ -47,7 +47,8 @@ order changes the live graph.
 - **Offline mode** (default): simple keyword rules choose the tools. Fully deterministic.
 - **LLM mode** (when `ANTHROPIC_API_KEY` is set): Claude chooses the tools. Its final sentence is checked. If it mentions a valve ID or a number the graph didn't return, it is thrown away and replaced with a summary built from the tool results.
 - The model **never writes Cypher**. It only fills tool arguments, which are validated (e.g. `V-\d{3}`) and looked up in the graph first.
-- **Acting**: closing valves happens only when a human presses *Approve*. The server then runs the simulation again, refuses if the break would still be fed or a valve is seized, and writes `WorkOrder`, `CLOSES` and `NOTIFIES` into the graph.
+- **Acting**: closing valves happens only when a human presses *Approve*. The server then runs the simulation again. It refuses if the break would still be fed, a valve is seized, or the impact differs from what the human saw. If a critical customer loses water, the human must tick an acknowledgement naming that customer, and the server checks the IDs. Then it writes `WorkOrder`, `CLOSES` and `NOTIFIES` into the graph.
+- **Restoring** re-opens valves one at a time on a sandbox first. If re-opening a valve would re-feed another active break, it stays closed and is handed to that break's work order.
 - **Memory**: seized valves, incidents and work orders stay in the graph. The next plan uses them, and the next session sees them.
 
 ## 6. The demo story
@@ -58,7 +59,7 @@ order changes the live graph.
 | Warning | V-265 not exercised since 2011 | Contingency: merge segments through V-265, simulate: dialysis cut off |
 | "Just close V-212 and V-213?" | No | SPpaths finds a 20-hop route from the reservoir to the break |
 | "V-265 is seized" | 7 valves, 66 accounts, dialysis out | `SET v:Seized`, so WCC grows the segment; Willow Ct has no other source path |
-| Approve | WO-1001 | Valves get `status='closed'` and lose `:Open`; notices recorded as edges |
+| Acknowledge + Approve | WO-1001 | Server re-simulates, checks the acknowledged customer IDs; valves get `status='closed'` and lose `:Open`; notices recorded as edges |
 | Elm St | Not in graph | Street name not found, so nothing runs |
 
 ## 7. Likely judge questions
@@ -66,7 +67,8 @@ order changes the live graph.
 - **"Why not just compute this in Python?"** The network and its state live in FalkorDB. WCC and shortest paths run in the database, and every change (seized valve, closed valve) is a graph write that the next query sees. The UI, the MCP server and tests all share that single source of truth. We do cross-check WCC against a Python union-find, but only as a *test*.
 - **"Is this real hydraulics?"** No. It is connectivity. It tells you whether water *can* reach a place, not at what pressure. Utilities would pair it with a hydraulic model. Say so plainly.
 - **"How is this different from Blast Radius?"** Blast Radius *reads* an existing dependency graph. ShutOff *decides an intervention*, tests it on a copy, checks safety conditions, writes the change after approval, and re-plans when a crew reports a failure.
-- **"What stops the AI from doing something dangerous?"** It has no tool to close valves. A human approves, and the server re-verifies before writing.
+- **"What stops the AI from doing something dangerous?"** It has no tool to close valves. A human approves, and the server re-verifies before writing: same impact as shown, no seized valves, the break really isolated, critical customers explicitly acknowledged.
+- **"Is the dialysis patient protected?"** Be precise: the network has no other path to Willow Ct, so no valve plan can keep it supplied once V-265 fails. ShutOff *predicts* the risk before it happens, flags it, forces an explicit acknowledgement, and records a priority notice (simulated). It does not magically protect it.
 - **"What did you build vs. the AI?"** Answer honestly using `docs/AI_DISCLOSURE.md`.
 
 ## 8. Files to know
@@ -81,4 +83,4 @@ order changes the live graph.
 | `shutoff/agent.py` | Offline planner, Claude tool loop, reply check |
 | `shutoff/api.py`, `web/` | Web app |
 | `shutoff/mcp_server.py` | MCP server |
-| `tests/` | 26 tests |
+| `tests/` | 40 tests |

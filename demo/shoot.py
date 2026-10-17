@@ -23,6 +23,8 @@ with sync_playwright() as p:
     pg.screenshot(path=f"{OUT}/2-naive-plan-rejected.png")
     say("Crew: V-265 won't turn, it's seized")
     pg.screenshot(path=f"{OUT}/3-plan-b-seized-valve.png")
+    pg.check("#ack")
+    pg.screenshot(path=f"{OUT}/3b-acknowledge-critical.png")
     pg.click(".approve")
     pg.wait_for_function("!document.querySelector('.typing')")
     pg.wait_for_timeout(400)

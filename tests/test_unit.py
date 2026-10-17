@@ -58,3 +58,18 @@ def test_reply_check_rejects_invented_ids_and_counts():
 def test_summary_marks_refusals_and_missing_data():
     assert agent.summarize("locate_break", {"outcome": "not_in_graph", "reason": "Street 'Elm St' is not in the network graph."}).startswith("Not in the graph")
     assert agent.summarize("issue_work_order", {"outcome": "refused", "reason": "x"}).startswith("Refused")
+
+
+
+def test_reply_check_ignores_digits_inside_timestamps_and_ids():
+    steps = [Step("plan_isolation", {}, {"warnings": ["V-265 last exercised 2011-04"],
+                                         "simulation": {"accounts_out": 34}}, [], 1.0)]
+    ok, why = check_reply("2011 accounts lose water.", steps)
+    assert not ok and "2011" in why
+    assert check_reply("34 accounts lose water.", steps)[0]
+
+
+def test_reply_check_accepts_totals_and_counts_from_customer_names():
+    steps = [Step("plan_isolation", {}, {"simulation": {"unintended": [
+        {"name": "Willow Ct 400 block (14 homes)", "accounts": 14}, {"name": "dialysis", "accounts": 1}]}}, [], 1.0)]
+    assert check_reply("15 accounts are cut off, including 14 homes on Willow Ct.", steps)[0]

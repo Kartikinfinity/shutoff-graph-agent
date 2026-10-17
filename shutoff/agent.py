@@ -92,7 +92,8 @@ def _update_state(s: Session, name: str, args: dict, result: dict) -> None:
         s.proposal = {"pipe": result["pipe"]["id"], "pipe_label": result["pipe"]["label"],
                       "valves": [v["id"] for v in result["close"]],
                       "accounts_out": sim["accounts_out"],
-                      "critical_out": [c["name"] for c in sim["critical_out"]]}
+                      "critical_out": [c["name"] for c in sim["critical_out"]],
+                      "critical_ids": sorted({c["id"] for c in sim["critical_out"]})}
     if name == "issue_work_order" and result.get("outcome") == "issued":
         s.proposal = None
 
@@ -120,16 +121,22 @@ def handle(sid: str, text: str) -> dict:
             "steps": [st.__dict__ for st in steps], "proposal": s.proposal, "active_pipe": s.active_pipe}
 
 
-def approve(sid: str) -> dict:
-    """The supervisor pressed Approve: commit the current proposal."""
+def _issue_args(s: Session, acknowledge: list[str] | None) -> dict:
+    p = s.proposal
+    return {"pipe_id": p["pipe"], "valve_ids": p["valves"], "report": s.report, "confirmed_by_human": True,
+            "acknowledge_critical": acknowledge or [],
+            "expected_accounts_out": p["accounts_out"], "expected_critical_ids": p["critical_ids"]}
+
+
+def approve(sid: str, acknowledge: list[str] | None = None) -> dict:
+    """The supervisor pressed Approve: commit the current proposal, bound to the
+    impact they were shown and to the critical customers they acknowledged."""
     s = session(sid)
     steps: list[Step] = []
     if not s.proposal:
         return {"reply": "There is no plan to approve.", "mode": "human-action", "verified": True,
                 "note": None, "steps": [], "proposal": None, "active_pipe": s.active_pipe}
-    p = s.proposal
-    r = _run_tool(s, "issue_work_order", {"pipe_id": p["pipe"], "valve_ids": p["valves"], "report": s.report,
-                                          "confirmed_by_human": True}, steps)
+    r = _run_tool(s, "issue_work_order", _issue_args(s, acknowledge), steps)
     return {"reply": summarize("issue_work_order", r), "mode": "human-action", "verified": True, "note": None,
             "steps": [st.__dict__ for st in steps], "proposal": s.proposal, "active_pipe": s.active_pipe}
 
@@ -149,12 +156,13 @@ def _approval_intent(s: Session, text: str, steps: list[Step]) -> str | None:
     if m:
         r = _run_tool(s, "restore_service", {"work_order_id": m.group(1).upper()}, steps)
         return summarize("restore_service", r)
-    if re.fullmatch(r"\s*(approve[d]?|approved?,? issue it|go ahead|issue (the )?work order|confirm)\W*", low):
+    m = re.fullmatch(r"\s*(?:approve[d]?|go ahead|issue (?:the )?work order|confirm)"
+                     r"(?:\s*(?:,|and)?\s*(acknowledge[d]?)(?: (?:the )?critical(?: customers?)?)?)?\W*", low)
+    if m:
         if not s.proposal:
             return "There is no plan to approve yet."
-        p = s.proposal
-        r = _run_tool(s, "issue_work_order", {"pipe_id": p["pipe"], "valve_ids": p["valves"],
-                                              "report": s.report, "confirmed_by_human": True}, steps)
+        ack = s.proposal["critical_ids"] if m.group(1) else []
+        r = _run_tool(s, "issue_work_order", _issue_args(s, ack), steps)
         return summarize("issue_work_order", r)
     return None
 
@@ -162,8 +170,24 @@ def _approval_intent(s: Session, text: str, steps: list[Step]) -> str | None:
 # ------------------------------------------------------------------ offline
 
 LANDMARKS = ["hospital", "school", "elementary", "bakery", "senior", "oakview", "dialysis", "willow ct"]
-SEIZED_WORDS = r"(seized|stuck|won'?t (?:turn|close|move|budge)|will not (?:turn|close)|frozen|jammed|broken|can'?t (?:turn|close))"
-OK_WORDS = r"(freed|working|works|turned|is ok|is fine|fixed|operable)"
+SEIZED_WORDS = (r"(?:seized|stuck|jammed|frozen|inoperable|won'?t (?:turn|close|move|budge)|"
+                r"will not (?:turn|close|move)|can'?t (?:turn|close|move)|cannot (?:turn|close|move))")
+OK_WORDS = r"(?:freed|working|works|turns|turned|operable|fixed|ok|okay|fine)"
+_VLIST = r"(V-\d{3}(?:\s*(?:,|and|&)\s*V-\d{3})*)"
+_FILLER = r"\s*(?:valves?\s*)?(?:,?\s*(?:it|they|which)(?:'s|\s+is|\s+are)?\s*)?(?:is|are|was|were|has|have|seems|looks)?\s*(?:still\s+|now\s+|completely\s+|totally\s+)?(?:been\s+)?"
+
+
+def _valves_described(text: str, words: str) -> list[str]:
+    """Valve ids the sentence actually says are `words` (e.g. 'V-265 won't turn',
+    'V-212 and V-213 are stuck', 'stuck valve V-265'). A valve id merely
+    mentioned near the word ('main broken near V-230') does not count."""
+    found: list[str] = []
+    for pat in (_VLIST + _FILLER + words + r"\b", r"\b" + words + r"\s*(?:valves?\s*)?:?\s*" + _VLIST):
+        for m in re.finditer(pat, text, re.I):
+            for v in re.findall(r"V-\d{3}", m.group(1), re.I):
+                if v.upper() not in found:
+                    found.append(v.upper())
+    return found
 
 
 def _street_mentions(text: str) -> list[str]:
@@ -186,18 +210,20 @@ def _offline_turn(s: Session, text: str, steps: list[Step]) -> str:
     valves = [v.upper() for v in re.findall(r"\bV-\d{3}\b", text, re.I)]
 
     # 1. Field report about a valve.
-    if valves and re.search(SEIZED_WORDS, low):
+    seized = _valves_described(text, SEIZED_WORDS)
+    if seized:
         out = []
-        for v in valves:
+        for v in seized:
             r = _run_tool(s, "report_valve_condition", {"valve_id": v, "condition": "seized", "note": text}, steps)
             out.append(summarize("report_valve_condition", r))
         if s.active_pipe:
             r = _run_tool(s, "plan_isolation", {"pipe_id": s.active_pipe}, steps)
             out.append("Re-planned: " + summarize("plan_isolation", r))
         return " ".join(out)
-    if valves and re.search(OK_WORDS, low) and not re.search(r"\b(close|shut)\b", low):
+    freed = [] if re.search(r"\b(close|shut)\b", low) else _valves_described(text, OK_WORDS)
+    if freed:
         out = []
-        for v in valves:
+        for v in freed:
             r = _run_tool(s, "report_valve_condition", {"valve_id": v, "condition": "ok", "note": text}, steps)
             out.append(summarize("report_valve_condition", r))
         if s.active_pipe:
@@ -272,6 +298,9 @@ def _names(cs: list[dict]) -> str:
 def summarize(tool: str, r: dict) -> str:
     """Plain-English sentences built only from tool results."""
     o = r.get("outcome")
+    if o == "needs_acknowledgement":
+        return ("Not issued: " + r["reason"] + " Tick the acknowledgement in the plan panel, or type "
+                "'approve and acknowledge'.")
     if o in ("not_in_graph", "invalid_arguments", "error", "refused"):
         extra = ""
         if r.get("leak_path"):
@@ -293,6 +322,8 @@ def summarize(tool: str, r: dict) -> str:
         parts[0] += "."
         parts.append("Break isolated (verified on a sandbox copy of the graph)." if sim["isolated"]
                      else "WARNING: the break is still fed.")
+        if sim.get("already_out_accounts"):
+            parts.append(f"({sim['already_out_accounts']} accounts are already out under other work orders; not counted above.)")
         if sim["critical_out"]:
             parts.append(f"CRITICAL: {_names(sim['critical_out'])} would lose water; priority notice and alternate supply needed.")
         else:
@@ -300,8 +331,11 @@ def summarize(tool: str, r: dict) -> str:
         risky = [c for c in r["contingencies"] if c["extra_accounts"] > 0 or c["critical_out"]]
         for w in r["warnings"]:
             parts.append(w)
+        for c in r["contingencies"]:
+            if not c["isolated"]:
+                parts.append(f"If {c['if_fails']} will not turn, there is no backup isolation with operable valves.")
         for c in risky:
-            if c["critical_out"] and c["critical_out"] != [x["name"] for x in sim["critical_out"]]:
+            if c["isolated"] and c["critical_out"] and c["critical_out"] != [x["name"] for x in sim["critical_out"]]:
                 parts.append(f"If {c['if_fails']} will not turn, the plan grows to {len(c['close_instead'])} valves and "
                              f"{c['accounts_out']} accounts, and cuts off {', '.join(c['critical_out'])}.")
         if len(r.get("history") or []) >= 2:
@@ -343,7 +377,10 @@ def summarize(tool: str, r: dict) -> str:
             msg += f"; PRIORITY notice for {', '.join(r['priority_notices'])}"
         return msg + f". ({r['dispatch']}.)"
     if tool == "restore_service":
-        return f"{r['work_order']} restored: valves re-opened in the graph and {r['incident']} resolved."
+        msg = f"{r['work_order']} restored and {r['incident']} resolved. Re-opened: {', '.join(r['reopened']) or 'none'}."
+        for k in r["kept_closed"]:
+            msg += f" Kept {k['valve']} closed ({k['reason']}: {', '.join(k['held_by'])})."
+        return msg
     return json.dumps(r)[:400]
 
 
@@ -360,10 +397,31 @@ def _compact(result: dict) -> str:
     return json.dumps(strip(result), default=str)[:12000]
 
 
+def _result_numbers(x, acc: set[str]) -> None:
+    """Integers that are actual result values (not digits inside timestamps or ids),
+    plus account totals over customer lists."""
+    if isinstance(x, bool):
+        return
+    if isinstance(x, (int, float)) and float(x).is_integer():
+        acc.add(str(int(x)))
+    elif isinstance(x, dict):
+        for v in x.values():
+            _result_numbers(v, acc)
+    elif isinstance(x, list):
+        for v in x:
+            _result_numbers(v, acc)
+        accts = [c.get("accounts") for c in x if isinstance(c, dict) and isinstance(c.get("accounts"), int)]
+        if accts:
+            acc.add(str(sum(accts)))
+        acc.add(str(len(x)))
+
+
 def check_reply(reply: str, steps: list[Step]) -> tuple[bool, str | None]:
     """Reject replies that mention ids or account counts the graph never returned."""
     evidence = json.dumps([st.result for st in steps], default=str)
-    numbers = set(re.findall(r"\b\d+\b", evidence))
+    numbers: set[str] = set(COUNT_RE.findall(evidence))  # e.g. '(20 homes)' inside customer names
+    for st in steps:
+        _result_numbers(st.result, numbers)
     bad_ids = [i for i in ID_RE.findall(reply) if i not in evidence]
     bad_counts = [n for n in COUNT_RE.findall(reply) if n not in numbers]
     if bad_ids or bad_counts:

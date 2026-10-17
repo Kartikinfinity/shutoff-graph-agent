@@ -108,7 +108,9 @@ async function send(text, endpoint = "/api/chat", extra = {}) {
 }
 
 function setBusy(b) {
-  for (const el of document.querySelectorAll("#composer button, #chips button, .approve")) el.disabled = b || (el.classList.contains("approve") && !canApprove());
+  for (const el of document.querySelectorAll("#composer button, #chips button")) el.disabled = b;
+  const ap = document.querySelector(".approve"), ack = document.querySelector("#ack");
+  if (ap) ap.disabled = b || !canApprove() || (ack !== null && !ack.checked);
 }
 
 // ------------------------------------------------------------------ overlays from tool results
@@ -316,6 +318,9 @@ function renderPlan() {
   h += sim.isolated
     ? `<div class="alert green">Break isolated: verified by re-running connectivity on a sandbox copy of the graph.</div>`
     : `<div class="alert red">The break cannot be isolated with operable valves.</div>`;
+  if (sim.already_out_accounts) {
+    h += `<div class="alert amber">${sim.already_out_accounts} accounts are already out under other active work orders; they are not counted in this plan's impact.</div>`;
+  }
   if (sim.unintended.length) {
     h += `<div class="alert red"><b>Unintended cut-off:</b> ${sim.unintended.map((c) => esc(c.name)).join(", ")}. These customers are outside the segment but their only supply runs through it.</div>`;
   }
@@ -335,6 +340,7 @@ function renderPlan() {
       p.contingencies.map((c) => {
         const already = new Set(sim.critical_out.map((x) => x.name));
         const extra = c.critical_out.filter((n) => !already.has(n));
+        if (!c.isolated) return `<tr><td class="mono nowrap">${esc(c.if_fails)}</td><td colspan="3"><b style="color:var(--cut)">no backup isolation with operable valves</b></td></tr>`;
         return `<tr><td class="mono nowrap">${esc(c.if_fails)}</td><td class="nowrap">${c.close_instead.length} valves</td><td class="nowrap">${c.accounts_out}${c.extra_accounts ? ` (+${c.extra_accounts})` : ""}</td><td>${extra.length ? `<b style="color:var(--cut)">+ ${esc(extra.join(", "))}</b>` : `<span class="muted">no new</span>`}</td></tr>`;
       }).join("") + `</table>`;
   }
@@ -343,12 +349,22 @@ function renderPlan() {
     h += `<div class="alert green"><b>${esc(w.work_order)}</b> issued. Valves closed in the graph; ${w.standard_notices} standard notices` +
       (w.priority_notices.length ? ` and PRIORITY notice for ${esc(w.priority_notices.join(", "))}` : "") + ` recorded. <i>Dispatch and notices are simulated.</i></div>`;
   } else {
-    h += `<button class="primary approve" ${canApprove() ? "" : "disabled"}>Approve &amp; issue work order</button>
-      <div class="approve-note">Human approval required. The server re-runs the simulation before closing anything. Crew dispatch and customer notices are simulated.</div>`;
+    const crit = sim.critical_out;
+    if (crit.length) {
+      h += `<label class="ack"><input type="checkbox" id="ack"><span>I acknowledge that <b>${esc(crit.map((c) => c.name).join(", "))}</b> will lose water, and that a priority notice and alternate supply are required.</span></label>`;
+    }
+    h += `<button class="primary approve" ${canApprove() && !crit.length ? "" : "disabled"}>Approve &amp; issue work order</button>
+      <div class="approve-note">Human approval required. The server re-runs the simulation, refuses if the impact differs from what is shown here, and refuses if a critical customer is cut off without acknowledgement. Crew dispatch and customer notices are simulated.</div>`;
   }
   box.innerHTML = h;
   const btn = box.querySelector(".approve");
-  if (btn) btn.onclick = () => { addMsg("user", "Approve plan"); send("", "/api/approve"); };
+  const ack = box.querySelector("#ack");
+  if (ack && btn) ack.onchange = () => { btn.disabled = !(ack.checked && canApprove()); };
+  if (btn) btn.onclick = () => {
+    const ids = ack && ack.checked ? sim.critical_out.map((c) => c.id) : [];
+    addMsg("user", ids.length ? "Approve plan (critical impact acknowledged)" : "Approve plan");
+    send("", "/api/approve", { acknowledge: ids });
+  };
 }
 
 // ------------------------------------------------------------------ evidence

@@ -125,6 +125,21 @@ WHERE v.id IN $close OR v.status = 'closed'
 DETACH DELETE v
 """
 
+# Two-step version used by simulate(): first what is already closed (other
+# work orders), measure the baseline, then the planned closures. The plan's
+# impact is the difference, so outages caused by other work orders are not
+# counted against it.
+SIM_DELETE_CLOSED = """
+MATCH (v:Valve)
+WHERE v.status = 'closed'
+DETACH DELETE v
+"""
+SIM_DELETE_VALVES = """
+MATCH (v:Valve)
+WHERE v.id IN $close
+DETACH DELETE v
+"""
+
 SIM_DRY_PIPES = """
 CALL algo.WCC({nodeLabels: ['Source', 'Junction', 'Pipe', 'Valve'], relationshipTypes: ['CONNECTS']})
 YIELD node, componentId
@@ -196,12 +211,30 @@ CREATE (w)-[:NOTIFIES {priority: n.priority, channel: 'simulated'}]->(c)
 RETURN count(c) AS notified
 """
 
-RESTORE_WORK_ORDER = """
-MATCH (w:WorkOrder {id: $wo})-[:CLOSES]->(v:Valve)
-SET v.status = 'open', v:Open, w.status = 'restored', w.restored_at = $at
-WITH DISTINCT w
-MATCH (w)-[:FOR]->(i:Incident)
-SET i.status = 'resolved'
+WORK_ORDER_BY_ID = """
+MATCH (w:WorkOrder {id: $wo})-[:FOR]->(i:Incident)-[:ON]->(p:Pipe)
+OPTIONAL MATCH (w)-[:CLOSES]->(v:Valve)
+RETURN w.id AS id, w.status AS status, i.id AS incident, p.id AS pipe, collect(DISTINCT v.id) AS valves
+"""
+
+# Restore only re-opens valves that no other active work order still needs
+# (checked on a sandbox first, see network.restore_work_order).
+REOPEN_VALVES = """
+MATCH (v:Valve)
+WHERE v.id IN $ids
+SET v.status = 'open', v:Open
+RETURN count(v) AS reopened
+"""
+
+TRANSFER_HOLD = """
+MATCH (w:WorkOrder {id: $to}), (v:Valve {id: $valve})
+CREATE (w)-[:CLOSES {inherited_from: $from}]->(v)
+RETURN w.id AS id
+"""
+
+CLOSE_OUT_WORK_ORDER = """
+MATCH (w:WorkOrder {id: $wo, status: 'issued'})-[:FOR]->(i:Incident)
+SET w.status = 'restored', w.restored_at = $at, w.kept_closed = $kept, i.status = 'resolved'
 RETURN w.id AS id, i.id AS incident
 """
 

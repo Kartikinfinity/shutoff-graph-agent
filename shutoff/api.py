@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -17,7 +18,24 @@ from . import agent, db as dbm, network as N, seed
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 
-app = FastAPI(title="ShutOff", version="1.0")
+
+
+def _ensure_seeded() -> None:
+    graphs = dbm.db().list_graphs()
+    for g in graphs:  # sandboxes left behind by a killed process
+        if g.startswith(f"{dbm.GRAPH}__sim_"):
+            dbm.graph(g).delete()
+    if dbm.GRAPH not in graphs:
+        seed.load()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    _ensure_seeded()
+    yield
+
+
+app = FastAPI(title="ShutOff", version="1.0", lifespan=lifespan)
 
 
 class ChatIn(BaseModel):
@@ -29,14 +47,12 @@ class SessionIn(BaseModel):
     session: str = Field(default="demo", max_length=40)
 
 
+class ApproveIn(SessionIn):
+    acknowledge: list[str] = Field(default_factory=list, max_length=10)
+
+
 class RestoreIn(SessionIn):
     work_order: str = Field(max_length=10)
-
-
-@app.on_event("startup")
-def _ensure_seeded() -> None:
-    if dbm.GRAPH not in dbm.db().list_graphs():
-        seed.load()
 
 
 @app.get("/api/health")
@@ -63,8 +79,8 @@ def chat(body: ChatIn) -> dict:
 
 
 @app.post("/api/approve")
-def approve(body: SessionIn) -> dict:
-    return agent.approve(body.session)
+def approve(body: ApproveIn) -> dict:
+    return agent.approve(body.session, body.acknowledge)
 
 
 @app.post("/api/restore")

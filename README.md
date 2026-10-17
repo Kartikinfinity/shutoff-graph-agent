@@ -21,8 +21,14 @@ ShutOff turns a dispatcher's message ("water gushing on Maple St between 2nd and
 6. **Record field reports**: "V-265 is seized" becomes a `:Seized` label in the graph, and every later plan routes around it.
 7. **Act** (human-approved): close the valves in the graph, open an `Incident` and a `WorkOrder`,
    and record priority and standard notices. The server **re-simulates before committing** and refuses
-   plans that leak or depend on a seized valve. *Crew dispatch and customer notices are simulated; nothing is sent.*
-8. **Prevent**: rank valves for exercising by simulating each one being seized ("which valve failure would hurt most?").
+   a plan that leaks, depends on a seized valve, or **has a different impact from the one the approver was shown**.
+   If a critical customer (e.g. the home-dialysis account) would lose water, approval requires an
+   **explicit acknowledgement** of that customer, enforced server-side. *Crew dispatch and customer
+   notices are simulated; nothing is sent.*
+8. **Restore safely**: re-opening valves is checked on a sandbox first. A valve that another active
+   work order relies on stays closed and is handed over to that work order, so restoring one break
+   never re-feeds another.
+9. **Prevent**: rank valves for exercising by simulating each one being seized ("which valve failure would hurt most?").
 
 ![Plan B after a seized valve](docs/screenshots/3-plan-b-seized-valve.png)
 
@@ -37,7 +43,8 @@ Every decision is a connectivity question on a looped network:
 | A valve is seized: what now? | Same WCC, but `:Seized` valves are pass-through, so segments merge |
 | Is the break still fed? Who loses water? | WCC on the sandbox after closures; components with no `Source` are dry |
 | Prove the hospital is still supplied | `algo.SPpaths` from a `Source` to the hospital's main on the sandbox |
-| Which valve should we exercise first? | One sandbox, toggle labels per valve, re-run WCC (88 scenarios in ~0.4 s) |
+| Is it safe to re-open this work order's valves? | Sandbox: set each valve `:Open`, re-run WCC; keep it closed if another active break is no longer dry |
+| Which valve should we exercise first? | One sandbox, toggle labels per valve, re-run WCC (96 scenarios on the fresh network, ~0.4 s) |
 
 Take FalkorDB out and ShutOff cannot produce a plan, a leak path, a contingency or a ranking.
 The language model never decides connectivity. The graph does.
@@ -145,7 +152,10 @@ WCC over `['Source','Junction','Pipe','Open']`, then `SET v:Open` back.
 - **Fixed tool catalogue.** The model picks tools and fills typed arguments. IDs are format-validated and resolved against the graph before any query runs. Nothing the model writes is concatenated into Cypher.
 - **Read tools use `ro_query`**. A test proves a write through the read path fails.
 - **The model can't close valves.** `issue_work_order` and `restore_service` are not offered to the chat model. They run only on a human action (the Approve button or a typed "approve"). MCP marks them `destructiveHint` and requires `confirmed_by_human=true`.
-- **Re-verification on commit.** `issue_work_order` re-runs the simulation server-side and refuses a plan that leaks or uses a seized valve.
+- **Re-verification on commit.** `issue_work_order` re-runs the simulation server-side and refuses a plan that leaks, uses a seized valve, or whose impact (accounts out, critical customers) differs from what the approver saw. Critical cut-offs must be acknowledged customer by customer.
+- **Impact is attributed correctly.** Outages already caused by other active work orders are measured as a baseline on the sandbox and reported separately, not counted against a new plan.
+- **Safe restore.** Restoring a work order re-opens only valves no other active work order needs, checked on a sandbox.
+- **Field reports must be explicit.** The offline parser records a valve as seized only when the sentence says so about that valve ("V-265 won't turn"), not when an ID is merely mentioned near a keyword.
 - **Grounded replies.** In LLM mode, a reply naming a valve or pipe ID or an account count the graph didn't return is rejected and replaced with a summary built from tool results. The UI shows which happened.
 - **Evidence panel.** Every tool call lists its Cypher, parameters, row counts, latency, and whether it ran on the sandbox.
 
@@ -170,7 +180,7 @@ uvicorn shutoff.api:app --port 8000       # open http://localhost:8000
 ### Tests
 
 ```bash
-python -m pytest -q        # 26 tests, needs the FalkorDB container; uses a separate 'riverbend_test' graph
+python -m pytest -q        # 40 tests, needs the FalkorDB container; uses a separate 'riverbend_test' graph
 ```
 The tests cover:
 - WCC versus an independent union-find.
@@ -178,7 +188,10 @@ The tests cover:
 - Leak paths made of real pipe connections.
 - Refusals: seized valve, leaking plan, missing human confirmation, invalid or injected IDs.
 - The sandbox never changing the live graph.
-- Work order write and restore.
+- Work order write and restore, including restore never re-feeding another active break.
+- Critical-customer acknowledgement, approval bound to the shown impact, and impact attribution with other work orders active.
+- `GRAPH.COPY` surviving a concurrent Redis background save (fork contention, retried).
+- The HTTP API end to end.
 - Priority notices.
 - Unknown and ambiguous locations.
 - The MCP tool gating.
@@ -186,7 +199,7 @@ The tests cover:
 
 ## Demo video
 
-`demo/shutoff-demo.webm` (about 1:42) is recorded by [`demo/record_demo.py`](demo/record_demo.py) with Playwright
+`demo/shutoff-demo.webm` (about 1:45) is recorded by [`demo/record_demo.py`](demo/record_demo.py) with Playwright
 against the running app and FalkorDB. Everything on screen is real app output. The script only types
 the messages and overlays caption text.
 
@@ -196,7 +209,7 @@ the messages and overlays caption text.
 2. "Crew wants to just close V-212 and V-213". Rejected, with the purple leak path drawn from the reservoir to the break.
 3. "Is the hospital still supplied?". Yes, with a 14-hop path from Hilltop Tank.
 4. "Crew: V-265 won't turn". The valve is recorded as seized and the plan is redone: 7 valves, 66 accounts, and an unintended cut-off of Willow Ct, including the medical-priority account.
-5. **Approve** creates WO-1001. Valves turn black in the graph, a priority notice is recorded (simulated), and the outage shows on the map.
+5. Tick the acknowledgement (the dialysis account loses water), then **Approve** creates WO-1001. Valves turn black in the graph, a priority notice is recorded (simulated), and the outage shows on the map.
 6. "Burst main on Elm St at 5th" returns *Not in the graph*. "Leak at Oak & 3rd" returns *ambiguous*, with the candidate mains listed.
 7. "Which valves should we exercise first?" returns valves ranked by simulated impact.
 
@@ -207,7 +220,7 @@ the messages and overlays caption text.
 | Segment WCC query | ~2 ms |
 | One closure simulation (copy, close, WCC, paths, cleanup) | ~115 ms |
 | Full plan with 4 contingency simulations | ~0.5 s |
-| Valve-exercise ranking (88 scenarios) | ~0.4 s |
+| Valve-exercise ranking (96 scenarios, fresh network) | ~0.4 s |
 
 ## Limitations (honest list)
 
@@ -217,6 +230,9 @@ the messages and overlays caption text.
 - **LLM mode** is covered by mocked-client tests. It hasn't been run against the live API in this repo unless a key was configured; the offline planner covers the demo. The offline parser understands a limited set of phrasings.
 - The valve-exercise score is a transparent heuristic (accounts out + 60 per critical customer, weighted by condition and years since exercised), not a calibrated risk model.
 - Sessions are in memory; one demo user at a time.
+- A valve recorded as seized is treated as impassable-to-close even if it is currently closed (conservative: segments may come out larger than necessary).
+- Valves are modelled as two-way isolation points; check valves, pressure zones and PRVs are not modelled.
+- `GRAPH.COPY` forks the database process. When Redis's own background save is forking at the same moment the copy is retried (up to 3 s); this is covered by a stress test.
 
 ## Originality, data and AI disclosure
 

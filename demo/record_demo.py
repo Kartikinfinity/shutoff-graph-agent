@@ -105,7 +105,11 @@ def main() -> None:
         cap("Re-planned in under a second: 7 valves, 66 accounts, and an unintended cut-off of Willow Ct, including the medical-priority account.")
         wait(8500)
 
-        cap("The model cannot close valves. A supervisor approves; the server re-simulates before writing anything.")
+        cap("The model cannot close valves. Cutting off a critical customer also needs an explicit acknowledgement, enforced by the server.")
+        pg.locator("#plan").evaluate("el => el.scrollTo({top: 9999, behavior: 'smooth'})")
+        wait(4500)
+        pg.check("#ack")
+        cap("Approval is bound to the impact shown: the server re-simulates and refuses if anything changed.")
         wait(3500)
         pg.click(".approve")
         pg.wait_for_function("!document.querySelector('.typing')", timeout=30000)
@@ -123,13 +127,13 @@ def main() -> None:
         say("Which valves should we exercise first?")
         wait(7000)
 
-        cap("When repairs are done, restore re-opens the valves in the graph.")
+        cap("Restore re-opens valves only after a sandbox check that no other active break would be re-fed.")
         pg.click("#wo-bar button")
         pg.wait_for_function("!document.querySelector('.typing')", timeout=30000)
         wait(3500)
         cap("")
         card("ShutOff", "FalkorDB graph algorithms (WCC, SPpaths) + sandbox simulation via GRAPH.COPY<br>"
-                        "Fixed tools, no model-written Cypher · human-approved actions · MCP server · 26 tests<br>"
+                        "Fixed tools, no model-written Cypher · human-approved actions · MCP server · 40 tests<br>"
                         "<span style='color:#fcd58a'>Synthetic data · dispatch and notices simulated</span>")
         wait(5000)
         video = pg.video.path()

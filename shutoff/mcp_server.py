@@ -73,9 +73,14 @@ def pipe_history(pipe_id: str) -> str:
 
 
 @server.tool(description=T.TOOLS["issue_work_order"]["description"], annotations=DESTRUCTIVE)
-def issue_work_order(pipe_id: str, valve_ids: list[str], confirmed_by_human: bool, report: str = "") -> str:
+def issue_work_order(pipe_id: str, valve_ids: list[str], confirmed_by_human: bool, report: str = "",
+                     acknowledge_critical: list[str] | None = None, expected_accounts_out: int | None = None,
+                     expected_critical_ids: list[str] | None = None) -> str:
     return _out("issue_work_order", {"pipe_id": pipe_id, "valve_ids": valve_ids, "report": report,
-                                     "confirmed_by_human": confirmed_by_human})
+                                     "confirmed_by_human": confirmed_by_human,
+                                     "acknowledge_critical": acknowledge_critical or [],
+                                     "expected_accounts_out": expected_accounts_out,
+                                     "expected_critical_ids": expected_critical_ids or []})
 
 
 @server.tool(description=T.TOOLS["restore_service"]["description"], annotations=DESTRUCTIVE)

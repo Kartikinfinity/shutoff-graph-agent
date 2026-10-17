@@ -134,7 +134,7 @@ def test_issuing_a_work_order_changes_the_live_graph_and_restore_reverts_it(fres
 
 def test_critical_customer_gets_a_priority_notice(fresh):
     N.report_valve("V-265", "seized")
-    r = N.issue_work_order("P-107", PLAN_B)
+    r = N.issue_work_order("P-107", PLAN_B, acknowledge_critical=["C-MED7"])
     assert r["priority_notices"] == ["Willow Ct medical-priority account (home dialysis)"]
     rows = dbm.run("t", """MATCH (:WorkOrder {id: $wo})-[n:NOTIFIES]->(c:Customer {id: 'C-MED7'})
                            RETURN n.priority AS p, n.channel AS ch""", {"wo": r["work_order"]})
@@ -195,7 +195,10 @@ def test_offline_agent_conversation_end_to_end(fresh):
     r = agent.handle(sid, "V-265 won't turn")
     assert sorted(r["proposal"]["valves"]) == sorted(PLAN_B)
     assert "CRITICAL" in r["reply"]
-    r = agent.approve(sid)
+    r = agent.approve(sid)  # critical cut-off, not acknowledged
+    assert r["steps"][0]["result"]["outcome"] == "needs_acknowledgement"
+    assert N.open_work_orders() == []
+    r = agent.approve(sid, ["C-MED7"])
     assert r["steps"][0]["result"]["outcome"] == "issued"
     assert len(N.open_work_orders()) == 1
 
@@ -295,3 +298,149 @@ def test_llm_reply_with_invented_valve_is_rejected_and_rebuilt(fresh, monkeypatc
     r, _ = _run_llm(monkeypatch, script)
     assert r["verified"] is False and "V-777" in r["note"]
     assert "V-777" not in r["reply"] and "34 accounts" in r["reply"]
+
+
+
+# ------------------------------------------------------------ audit regressions (17 Oct 2026)
+
+def _dry_now():
+    return set(N.snapshot()["dry_pipes"])
+
+
+def test_restore_never_reopens_a_valve_another_active_work_order_holds(fresh):
+    wo1 = N.issue_work_order("P-107", PLAN_A)["work_order"]
+    wo2 = N.issue_work_order("P-108", ["V-214", "V-213"])["work_order"]  # V-213 also held by wo1
+    r = N.restore_work_order(wo2)
+    assert r["outcome"] == "restored"
+    assert [k["valve"] for k in r["kept_closed"]] == ["V-213"]
+    assert N.valve_info("V-213")["status"] == "closed"
+    assert "P-107" in _dry_now()  # the first break is still isolated
+
+
+def test_restore_keeps_valves_another_break_relies_on_and_hands_them_over(fresh):
+    wo1 = N.issue_work_order("P-107", PLAN_A)["work_order"]
+    plan = N.plan_isolation("P-108", with_contingencies=False)
+    assert [v["id"] for v in plan["close"]] == ["V-214"]          # relies on V-213 closed by wo1
+    assert [v["id"] for v in plan["already_closed"]] == ["V-213"]
+    wo2 = N.issue_work_order("P-108", ["V-214"])["work_order"]
+    r = N.restore_work_order(wo1)
+    kept = {k["valve"]: k for k in r["kept_closed"]}
+    assert set(kept) == {"V-213"} and kept["V-213"]["held_by"] == [wo2]
+    assert set(r["reopened"]) == {"V-212", "V-264", "V-265"}
+    dry = _dry_now()
+    assert "P-108" in dry and "P-107" not in dry
+    held = next(w for w in N.open_work_orders() if w["id"] == wo2)["valves"]
+    assert "V-213" in held
+    r = N.restore_work_order(wo2)
+    assert set(r["reopened"]) == {"V-213", "V-214"} and r["kept_closed"] == []
+    assert _dry_now() == set()
+
+
+def test_restore_is_not_repeatable(fresh):
+    wo = N.issue_work_order("P-107", PLAN_A)["work_order"]
+    assert N.restore_work_order(wo)["outcome"] == "restored"
+    r = N.restore_work_order(wo)
+    assert r["outcome"] == "refused" and "already restored" in r["reason"]
+    assert N.restore_work_order("WO-9999")["outcome"] == "not_in_graph"
+
+
+def test_plan_impact_excludes_outages_from_other_work_orders(fresh):
+    alone = N.plan_isolation("P-119", with_contingencies=False)["simulation"]
+    N.issue_work_order("P-107", PLAN_A)
+    sim = N.plan_isolation("P-119", with_contingencies=False)["simulation"]
+    assert sim["accounts_out"] == alone["accounts_out"]
+    assert sim["already_out_accounts"] == 34
+    assert not {"C-107", "C-136", "C-BAKERY"} & {c["id"] for c in sim["unintended"]}
+
+
+def test_critical_cutoff_needs_exact_acknowledgement(fresh):
+    N.report_valve("V-265", "seized")
+    r = N.issue_work_order("P-107", PLAN_B)
+    assert r["outcome"] == "needs_acknowledgement" and r["critical"] == [
+        {"id": "C-MED7", "name": "Willow Ct medical-priority account (home dialysis)"}]
+    assert N.issue_work_order("P-107", PLAN_B, acknowledge_critical=["C-HOSP"])["outcome"] == "needs_acknowledgement"
+    assert N.open_work_orders() == []
+    assert N.issue_work_order("P-107", PLAN_B, acknowledge_critical=["C-MED7"])["outcome"] == "issued"
+
+
+def test_approval_is_bound_to_the_impact_that_was_shown(fresh):
+    r = N.issue_work_order("P-107", PLAN_A, expected={"accounts_out": 30, "critical_ids": []})
+    assert r["outcome"] == "refused" and r.get("stale")
+    assert N.issue_work_order("P-107", PLAN_A, expected={"accounts_out": 34, "critical_ids": []})["outcome"] == "issued"
+
+
+def test_stale_proposal_is_refused_after_the_network_changes(fresh):
+    sid = "stale"
+    agent.SESSIONS.pop(sid, None)
+    r = agent.handle(sid, "Water gushing on Maple St between 2nd and 3rd Ave")
+    assert r["proposal"]["accounts_out"] == 34          # what the supervisor is looking at
+    N.issue_work_order("P-107", PLAN_A, "another crew got there first")
+    r = agent.approve(sid)                              # same valves, but the impact is now 0 new accounts
+    res = r["steps"][0]["result"]
+    assert res["outcome"] == "refused" and res["stale"] is True
+    assert len(N.open_work_orders()) == 1
+
+
+def test_duplicate_valve_ids_are_deduplicated(fresh):
+    r = N.issue_work_order("P-107", ["V-212", "V-212", "V-213", "V-264", "V-265"])
+    n = dbm.run("t", "MATCH (:WorkOrder {id: $w})-[c:CLOSES]->() RETURN count(c) AS n", {"w": r["work_order"]})[0]["n"]
+    assert r["close_sequence"] == PLAN_A and n == 4
+
+
+def test_offline_parser_only_records_valves_described_as_seized(fresh):
+    agent.SESSIONS.pop("kw", None)
+    r = agent.handle("kw", "Water main broken near V-230 on Pine St")
+    assert "report_valve_condition" not in [s["tool"] for s in r["steps"]]
+    assert N.valve_info("V-230")["condition"] == "ok"
+    r = agent.handle("kw", "The main near V-230 is leaking and V-231 is seized")
+    reported = [s["args"]["valve_id"] for s in r["steps"] if s["tool"] == "report_valve_condition"]
+    assert reported == ["V-231"]
+
+
+def test_typed_approval_needs_explicit_acknowledgement_for_critical_plans(fresh):
+    sid = "typed"
+    agent.SESSIONS.pop(sid, None)
+    agent.handle(sid, "Water gushing on Maple St between 2nd and 3rd Ave")
+    agent.handle(sid, "V-265 won't turn")
+    r = agent.handle(sid, "approve")
+    assert r["steps"][0]["result"]["outcome"] == "needs_acknowledgement" and "acknowledge" in r["reply"]
+    r = agent.handle(sid, "approve and acknowledge")
+    assert r["steps"][0]["result"]["outcome"] == "issued"
+
+
+# ------------------------------------------------------------ HTTP API
+
+def test_http_api_end_to_end(fresh):
+    from fastapi.testclient import TestClient
+
+    from shutoff.api import app
+
+    agent.SESSIONS.pop("http", None)
+    with TestClient(app) as c:
+        h = c.get("/api/health").json()
+        assert h["falkordb"] is True and h["mode"] == "offline"
+        net = c.get("/api/network").json()
+        assert {"nodes", "edges", "customers", "work_orders", "dry_pipes"} <= set(net)
+        assert c.post("/api/chat", json={"session": "http", "text": " "}).status_code == 400
+        r = c.post("/api/chat", json={"session": "http", "text": "Water gushing on Maple St between 2nd and 3rd Ave"}).json()
+        assert r["proposal"]["valves"] == PLAN_A
+        c.post("/api/chat", json={"session": "http", "text": "V-265 won't turn"})
+        r = c.post("/api/approve", json={"session": "http"}).json()
+        assert r["steps"][0]["result"]["outcome"] == "needs_acknowledgement"
+        r = c.post("/api/approve", json={"session": "http", "acknowledge": ["C-MED7"]}).json()
+        wo = r["steps"][0]["result"]["work_order"]
+        assert c.get("/api/network").json()["work_orders"][0]["id"] == wo
+        r = c.post("/api/restore", json={"session": "http", "work_order": wo}).json()
+        assert r["steps"][0]["result"]["outcome"] == "restored"
+
+
+def test_sandbox_survives_a_concurrent_background_save(fresh):
+    """GRAPH.COPY forks; a Redis BGSAVE child running at that moment made it fail
+    ('could not fork') before the retry was added."""
+    conn = dbm.db().connection
+    for _ in range(25):
+        try:
+            conn.bgsave()
+        except Exception:
+            pass  # a save already in progress is fine: it is exactly the collision we want
+        assert N.simulate(PLAN_A, "P-107")["isolated"] is True
