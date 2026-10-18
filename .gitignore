@@ -8,3 +8,6 @@ demo/raw/
 
 # Not part of the submission
 Past WeMakeDevs Hackathons & Winning Projects.pdf
+dist/
+output/
+tmp/
