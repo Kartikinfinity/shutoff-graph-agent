@@ -1,0 +1,2 @@
+# Optional: independent cross-check against WNTR (python -m benchmarks.wntr_crosscheck)
+wntr==1.5.0
