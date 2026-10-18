@@ -68,6 +68,14 @@ def report_valve_condition(args: dict) -> dict:
     return N.report_valve(_valve(args["valve_id"]), cond, _text(args.get("note"), 200))
 
 
+def valve_status(args: dict) -> dict:
+    v = N.valve_info(_valve(args["valve_id"]))
+    if not v:
+        return {"outcome": "not_in_graph", "reason": f"Valve {args['valve_id']} is not in the graph."}
+    return {"outcome": "found", "valve": v["id"], "location": v["location"], "status": v["status"],
+            "condition": v["condition"], "last_exercised": v["last_exercised"], "seized": "Seized" in v["labels"]}
+
+
 def supply_check(args: dict) -> dict:
     return N.supply_check(_text(args.get("customer"), 60))
 
@@ -93,15 +101,20 @@ def issue_work_order(args: dict) -> dict:
         return {"outcome": "refused", "reason": "A human must confirm before valves are closed."}
     valves = [_valve(v) for v in (args.get("valve_ids") or [])][:12]
     ack = [_text(c, 20) for c in (args.get("acknowledge_critical") or [])][:10]
-    expected = None
-    if args.get("expected_accounts_out") is not None:
-        expected = {"accounts_out": int(args["expected_accounts_out"]),
-                    "critical_ids": [_text(c, 20) for c in (args.get("expected_critical_ids") or [])]}
+    if args.get("expected_accounts_out") is None:
+        return {"outcome": "refused", "reason": ("Approval must carry the impact the human was shown "
+                                                 "(expected_accounts_out and expected_critical_ids from plan_isolation).")}
+    expected = {"accounts_out": int(args["expected_accounts_out"]),
+                "critical_ids": [_text(c, 20) for c in (args.get("expected_critical_ids") or [])]}
+    if args.get("expected_affected_ids") is not None:
+        expected["affected_ids"] = [_text(c, 20) for c in args["expected_affected_ids"]][:200]
     return N.issue_work_order(_pipe(args["pipe_id"]), valves, _text(args.get("report"), 300),
                               expected=expected, acknowledge_critical=ack)
 
 
 def restore_service(args: dict) -> dict:
+    if args.get("confirmed_by_human") is not True:
+        return {"outcome": "refused", "reason": "A human must confirm before valves are re-opened."}
     wo = _text(args.get("work_order_id"), 10).upper()
     if not WO_RE.match(wo):
         raise ToolError(f"'{wo}' is not a work order id (expected like WO-1001).")
@@ -154,6 +167,12 @@ TOOLS: dict[str, dict] = {
             "note": {"type": "string"},
         }, ["valve_id", "condition"]),
     },
+    "valve_status": {
+        "fn": valve_status,
+        "description": ("Read a valve's recorded status (open/closed) and condition (ok/unknown/seized). "
+                        "Use this for questions about a valve; it never changes anything."),
+        "schema": _schema({"valve_id": {"type": "string"}}, ["valve_id"]),
+    },
     "supply_check": {
         "fn": supply_check,
         "description": "Check whether a customer (by name) is supplied right now, and return the supply path from a source.",
@@ -189,13 +208,16 @@ TOOLS: dict[str, dict] = {
                                      "description": "Customer ids of critical customers the human accepts will lose water."},
             "expected_accounts_out": {"type": "integer"},
             "expected_critical_ids": {"type": "array", "items": {"type": "string"}},
-        }, ["pipe_id", "valve_ids", "confirmed_by_human"]),
+            "expected_affected_ids": {"type": "array", "items": {"type": "string"}},
+        }, ["pipe_id", "valve_ids", "confirmed_by_human", "expected_accounts_out"]),
     },
     "restore_service": {
         "fn": restore_service,
         "human_gated": True,
-        "description": "Re-open the valves of a work order and mark its incident resolved.",
-        "schema": _schema({"work_order_id": {"type": "string"}}, ["work_order_id"]),
+        "description": ("Re-open the valves of a work order (after a sandbox check that no other active break "
+                        "would be re-fed) and mark its incident resolved. Requires confirmed_by_human=true."),
+        "schema": _schema({"work_order_id": {"type": "string"}, "confirmed_by_human": {"type": "boolean"}},
+                          ["work_order_id", "confirmed_by_human"]),
     },
 }
 

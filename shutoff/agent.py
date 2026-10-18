@@ -31,11 +31,14 @@ SYSTEM_PROMPT = """You are ShutOff, the isolation assistant for the Riverbend wa
 A synthetic network graph (FalkorDB) is the only source of truth about pipes, valves and customers.
 
 When a main break is reported: locate it, then plan the isolation, and explain the plan.
-When a crew reports a valve will not turn: record it as seized, then re-plan the active break.
+When a crew reports an observation that a valve will not turn: record it as seized, then re-plan the active break.
+Questions ("is V-265 seized?") and what-if scenarios ("what if V-265 won't turn?") are NOT observations: answer them
+with valve_status or the plan's contingencies and record nothing.
 If someone proposes their own closure plan, check it before agreeing.
 Use tools for every fact. Never invent valve, pipe or customer names or counts; only use what tools returned.
 If a location is not in the graph or is ambiguous, say so and ask; do not guess.
-You cannot close valves yourself: the supervisor approves the plan with the Approve button.
+You cannot close or re-open valves yourself: the supervisor approves or restores with buttons.
+Everything you report is a simulation on a synthetic network: say "would", not "is", for proposed effects.
 Reply in at most 4 short sentences, plain text. Lead with the decision (which valves, how many accounts out),
 then any critical customer at risk and what to watch for."""
 
@@ -56,7 +59,10 @@ class Step:
 class Session:
     active_pipe: str | None = None
     report: str = ""
-    proposal: dict | None = None        # {"pipe", "valves", "accounts_out", "critical_out"}
+    proposal: dict | None = None        # the plan on screen; approval is bound to proposal["id"]
+    last_plan: dict | None = None       # full plan_isolation result behind the proposal
+    incident_seq: int = 0
+    rev: int = 0
     messages: list = field(default_factory=list)  # LLM conversation (LLM mode only)
 
 
@@ -84,16 +90,30 @@ def _run_tool(s: Session, name: str, args: dict, steps: list[Step]) -> dict:
 
 
 def _update_state(s: Session, name: str, args: dict, result: dict) -> None:
-    if name == "locate_break" and result.get("outcome") == "found":
-        s.active_pipe = result["pipe"]
-    if name == "plan_isolation" and result.get("outcome") == "planned":
-        s.active_pipe = result["pipe"]["id"]
-        sim = result["simulation"]
-        s.proposal = {"pipe": result["pipe"]["id"], "pipe_label": result["pipe"]["label"],
-                      "valves": [v["id"] for v in result["close"]],
-                      "accounts_out": sim["accounts_out"],
-                      "critical_out": [c["name"] for c in sim["critical_out"]],
-                      "critical_ids": sorted({c["id"] for c in sim["critical_out"]})}
+    if name == "locate_break":
+        # A new report opens a new incident context. Whatever happens next, the
+        # previous plan is no longer approvable.
+        s.incident_seq += 1
+        s.rev = 0
+        s.proposal = None
+        s.last_plan = None
+        s.active_pipe = result["pipe"] if result.get("outcome") == "found" else None
+    if name == "plan_isolation":
+        if result.get("outcome") == "planned":
+            s.active_pipe = result["pipe"]["id"]
+            s.rev += 1
+            sim = result["simulation"]
+            s.last_plan = result
+            s.proposal = {"id": f"IR{max(s.incident_seq, 1)}-r{s.rev}", "rev": s.rev,
+                          "pipe": result["pipe"]["id"], "pipe_label": result["pipe"]["label"],
+                          "valves": [v["id"] for v in result["close"]],
+                          "accounts_out": sim["accounts_out"],
+                          "critical_out": [c["name"] for c in sim["critical_out"]],
+                          "critical_ids": sorted({c["id"] for c in sim["critical_out"]}),
+                          "affected_ids": sorted({c["id"] for c in sim["intended"] + sim["unintended"]})}
+        else:  # cannot isolate / unknown pipe: nothing on screen may be approved
+            s.proposal = None
+            s.last_plan = None
     if name == "issue_work_order" and result.get("outcome") == "issued":
         s.proposal = None
 
@@ -125,17 +145,26 @@ def _issue_args(s: Session, acknowledge: list[str] | None) -> dict:
     p = s.proposal
     return {"pipe_id": p["pipe"], "valve_ids": p["valves"], "report": s.report, "confirmed_by_human": True,
             "acknowledge_critical": acknowledge or [],
-            "expected_accounts_out": p["accounts_out"], "expected_critical_ids": p["critical_ids"]}
+            "expected_accounts_out": p["accounts_out"], "expected_critical_ids": p["critical_ids"],
+            "expected_affected_ids": p["affected_ids"]}
 
 
-def approve(sid: str, acknowledge: list[str] | None = None) -> dict:
+def _reply(s: Session, reply: str, steps: list[Step], mode: str = "human-action") -> dict:
+    return {"reply": reply, "mode": mode, "verified": True, "note": None,
+            "steps": [st.__dict__ for st in steps], "proposal": s.proposal, "active_pipe": s.active_pipe}
+
+
+def approve(sid: str, acknowledge: list[str] | None = None, proposal_id: str | None = None) -> dict:
     """The supervisor pressed Approve: commit the current proposal, bound to the
-    impact they were shown and to the critical customers they acknowledged."""
+    plan revision on their screen, the impact they were shown and the critical
+    customers they acknowledged."""
     s = session(sid)
     steps: list[Step] = []
     if not s.proposal:
-        return {"reply": "There is no plan to approve.", "mode": "human-action", "verified": True,
-                "note": None, "steps": [], "proposal": None, "active_pipe": s.active_pipe}
+        return _reply(s, "There is no plan to approve. Report or re-plan the break first.", steps)
+    if proposal_id is not None and proposal_id != s.proposal["id"]:
+        return _reply(s, f"Not issued: the plan on screen ({proposal_id}) is no longer the current plan "
+                         f"({s.proposal['id']}). Review the current plan before approving.", steps)
     r = _run_tool(s, "issue_work_order", _issue_args(s, acknowledge), steps)
     return {"reply": summarize("issue_work_order", r), "mode": "human-action", "verified": True, "note": None,
             "steps": [st.__dict__ for st in steps], "proposal": s.proposal, "active_pipe": s.active_pipe}
@@ -144,7 +173,7 @@ def approve(sid: str, acknowledge: list[str] | None = None) -> dict:
 def restore(sid: str, wo: str) -> dict:
     s = session(sid)
     steps: list[Step] = []
-    r = _run_tool(s, "restore_service", {"work_order_id": wo}, steps)
+    r = _run_tool(s, "restore_service", {"work_order_id": wo, "confirmed_by_human": True}, steps)
     return {"reply": summarize("restore_service", r), "mode": "human-action", "verified": True, "note": None,
             "steps": [st.__dict__ for st in steps], "proposal": s.proposal, "active_pipe": s.active_pipe}
 
@@ -152,10 +181,13 @@ def restore(sid: str, wo: str) -> dict:
 def _approval_intent(s: Session, text: str, steps: list[Step]) -> str | None:
     """Typed human commands that commit actions are handled here, never by the model."""
     low = text.lower()
-    m = re.search(r"\b(?:restore|reopen|re-open)\b.*\b(WO-\d{4})\b", text, re.I)
+    m = re.fullmatch(r"\s*(?:please\s+)?(?:restore|re-?open)\s+(?:service\s+(?:for\s+)?)?(WO-\d{4})\s*[.!]?\s*", text, re.I)
     if m:
-        r = _run_tool(s, "restore_service", {"work_order_id": m.group(1).upper()}, steps)
+        r = _run_tool(s, "restore_service", {"work_order_id": m.group(1).upper(), "confirmed_by_human": True}, steps)
         return summarize("restore_service", r)
+    if re.search(r"\b(?:restore|re-?open)\b", low) and re.search(r"\bWO-\d{4}\b", text, re.I):
+        return ("No change made. To restore service, press Restore on the work order, or type exactly "
+                "'restore WO-1001' (with the right number).")
     m = re.fullmatch(r"\s*(?:approve[d]?|go ahead|issue (?:the )?work order|confirm)"
                      r"(?:\s*(?:,|and)?\s*(acknowledge[d]?)(?: (?:the )?critical(?: customers?)?)?)?\W*", low)
     if m:
@@ -205,12 +237,56 @@ def _street_mentions(text: str) -> list[str]:
     return found
 
 
+QUESTION_START = r"^\s*(?:what|how|is|are|was|were|can|could|should|would|will|do|does|did|why|when|where|which|who|has|have|shall|may|might)\b"
+HYPOTHETICAL = r"\b(?:what if|if|suppose|supposing|assume|assuming|in case|hypothetically|imagine|would|could|might)\b"
+
+
+def is_question(text: str) -> bool:
+    return text.strip().endswith("?") or bool(re.search(QUESTION_START, text, re.I))
+
+
+def is_hypothetical(text: str) -> bool:
+    return bool(re.search(HYPOTHETICAL, text, re.I))
+
+
+def is_observation(text: str) -> bool:
+    """A field report the graph may record: a statement, not a question or a what-if."""
+    return not is_question(text) and not is_hypothetical(text)
+
+
+def _valve_question(s: Session, text: str, valves: list[str], steps: list[Step]) -> str:
+    """Questions and what-ifs about valves are answered read-only."""
+    out = []
+    for v in valves:
+        cont = None
+        if s.last_plan and is_hypothetical(text):
+            cont = next((c for c in s.last_plan["contingencies"] if c["if_fails"] == v), None)
+        if cont:
+            base = s.last_plan["simulation"]["accounts_out"]
+            if not cont["isolated"]:
+                out.append(f"Hypothetical: if {v} cannot close, no operable valves would isolate the break.")
+            else:
+                out.append(f"Hypothetical (from the current plan's contingency simulation): if {v} cannot close, the "
+                           f"plan grows to {len(cont['close_instead'])} valves and {cont['accounts_out']} accounts "
+                           f"(+{cont['accounts_out'] - base})"
+                           + (f", cutting off {', '.join(cont['critical_out'])}" if cont["critical_out"] else "") + ".")
+        else:
+            r = _run_tool(s, "valve_status", {"valve_id": v}, steps)
+            out.append(summarize("valve_status", r))
+    return " ".join(out) + (" Nothing was recorded. To record a crew observation, state it, e.g. "
+                            "'Crew reports V-265 is seized'.")
+
+
 def _offline_turn(s: Session, text: str, steps: list[Step]) -> str:
     low = text.lower()
     valves = [v.upper() for v in re.findall(r"\bV-\d{3}\b", text, re.I)]
 
-    # 1. Field report about a valve.
-    seized = _valves_described(text, SEIZED_WORDS)
+    # 0. Questions and what-ifs about valves never write anything.
+    if valves and (is_question(text) or is_hypothetical(text)) and not re.search(r"\b(close|shut|closing|shutting)\b", low):
+        return _valve_question(s, text, valves, steps)
+
+    # 1. Field report about a valve (an observation, never a question or hypothesis).
+    seized = _valves_described(text, SEIZED_WORDS) if is_observation(text) else []
     if seized:
         out = []
         for v in seized:
@@ -220,7 +296,7 @@ def _offline_turn(s: Session, text: str, steps: list[Step]) -> str:
             r = _run_tool(s, "plan_isolation", {"pipe_id": s.active_pipe}, steps)
             out.append("Re-planned: " + summarize("plan_isolation", r))
         return " ".join(out)
-    freed = [] if re.search(r"\b(close|shut)\b", low) else _valves_described(text, OK_WORDS)
+    freed = [] if re.search(r"\b(close|shut)\b", low) or not is_observation(text) else _valves_described(text, OK_WORDS)
     if freed:
         out = []
         for v in freed:
@@ -254,7 +330,13 @@ def _offline_turn(s: Session, text: str, steps: list[Step]) -> str:
         who = m.group(1) if m else next((l for l in LANDMARKS if l in low), "")
         if who:
             r = _run_tool(s, "supply_check", {"customer": who}, steps)
-            return summarize("supply_check", r)
+            msg = summarize("supply_check", r)
+            if s.last_plan and r.get("outcome") in ("supplied", "no_supply"):
+                st = next((c for c in s.last_plan["simulation"]["critical_status"] if c["pipe"] == r["pipe"]), None)
+                if st:
+                    msg += (f" Under proposed plan {s.proposal['id'] if s.proposal else ''}: "
+                            + ("a source path would remain." if st["supplied"] else "it would lose its source connection.")).replace("  ", " ")
+            return msg
 
     # 6. A break report.
     for word, kind in re.findall(r"\b([a-z0-9]+)\s+(st|street|ave|avenue|rd|road|ct|court|ln|lane|blvd)\b", low):
@@ -315,19 +397,20 @@ def summarize(tool: str, r: dict) -> str:
         sim = r["simulation"]
         pipe = r["pipe"]
         valves = ", ".join(v["id"] for v in r["close"])
-        parts = [f"Break on {pipe['label']} ({pipe['id']}). Close {valves}: "
-                 f"{sim['accounts_out']} accounts lose water"]
+        parts = [f"Break on {pipe['label']} ({pipe['id']}). Proposed: close {valves}. In simulation "
+                 f"{sim['accounts_out']} accounts would lose water"]
         if sim["unintended"]:
-            parts[0] += f", including {sum(c['accounts'] for c in sim['unintended'])} cut off outside the segment ({_names(sim['unintended'])})"
+            parts[0] += f", including {sum(c['accounts'] for c in sim['unintended'])} cut off outside the shut-off area ({_names(sim['unintended'])})"
         parts[0] += "."
-        parts.append("Break isolated (verified on a sandbox copy of the graph)." if sim["isolated"]
-                     else "WARNING: the break is still fed.")
+        parts.append("Simulation on a copy of the graph: the break would be disconnected from every source." if sim["isolated"]
+                     else "WARNING: in simulation the break would still be connected to a source.")
         if sim.get("already_out_accounts"):
             parts.append(f"({sim['already_out_accounts']} accounts are already out under other work orders; not counted above.)")
         if sim["critical_out"]:
-            parts.append(f"CRITICAL: {_names(sim['critical_out'])} would lose water; priority notice and alternate supply needed.")
+            parts.append(f"CRITICAL: {_names(sim['critical_out'])} would lose its source connection; "
+                         "explicit acknowledgement is required before approval.")
         else:
-            parts.append("No critical customer loses water.")
+            parts.append("No critical customer would lose its source connection.")
         risky = [c for c in r["contingencies"] if c["extra_accounts"] > 0 or c["critical_out"]]
         for w in r["warnings"]:
             parts.append(w)
@@ -344,19 +427,24 @@ def summarize(tool: str, r: dict) -> str:
     if tool == "check_closure_plan":
         sim = r["simulation"]
         if sim["isolated"]:
-            return (f"Closing {', '.join(r['proposed'])} does isolate the break; {sim['accounts_out']} accounts lose water"
+            return (f"In simulation, closing {', '.join(r['proposed'])} would disconnect the break; "
+                    f"{sim['accounts_out']} accounts would lose water"
                     + (f", including critical: {_names(sim['critical_out'])}." if sim["critical_out"] else "."))
         lp = sim["leak_path"]
         path = " > ".join(lp["path"]) if lp else "unknown path"
-        return (f"No. Closing {', '.join(r['proposed'])} does NOT isolate the break: water still reaches it from "
+        return (f"No. With only {', '.join(r['proposed'])} closed, the graph still connects the break to "
                 f"{lp['source'] if lp else 'a source'} along {path}.")
     if tool == "report_valve_condition":
-        return f"Recorded {r['valve']} ({r['location']}) as {r['condition']}."
+        return f"Crew observation saved in the graph: {r['valve']} ({r['location']}) is {r['condition']}."
+    if tool == "valve_status":
+        return (f"{r['valve']} ({r['location']}): recorded {r['status']}, condition {r['condition']}"
+                f" (last exercised {r['last_exercised']}).")
     if tool == "supply_check":
         if o == "supplied":
             p = r["path"]
-            return f"{r['customer']} is supplied from {p['source']} ({int(p['hops'])} hops: {' > '.join(p['path'])})."
-        return f"{r['customer']} has NO path to any source right now."
+            return (f"Current graph (closures already in effect): {r['customer']} has a source path from "
+                    f"{p['source']} ({int(p['hops'])} hops). This is connectivity, not a pressure guarantee.")
+        return f"Current graph: {r['customer']} has NO path to any source."
     if tool == "valve_exercise_priorities":
         rows = r["ranked"]
         lines = [f"{x['valve']} ({x['location']}, last exercised {x['last_exercised']}, {x['condition']}): "
@@ -371,10 +459,10 @@ def summarize(tool: str, r: dict) -> str:
         return (f"{r['pipe']['label']} ({r['pipe']['material']}, {r['pipe']['installed']}): " +
                 "; ".join(f"{i['id']} {i['at']} {i['summary']}" for i in inc) + ".")
     if tool == "issue_work_order":
-        msg = (f"{r['work_order']} issued for {r['incident']}: close {', '.join(r['close_sequence'])} in that order. "
-               f"{r['accounts_out']} accounts out; {r['standard_notices']} standard notices queued")
+        msg = (f"{r['work_order']} recorded for {r['incident']}: valves {', '.join(r['close_sequence'])} marked closed "
+               f"in the graph; {r['accounts_out']} accounts affected; {r['standard_notices']} standard notices recorded")
         if r["priority_notices"]:
-            msg += f"; PRIORITY notice for {', '.join(r['priority_notices'])}"
+            msg += f"; PRIORITY notice recorded for {', '.join(r['priority_notices'])}"
         return msg + f". ({r['dispatch']}.)"
     if tool == "restore_service":
         msg = f"{r['work_order']} restored and {r['incident']} resolved. Re-opened: {', '.join(r['reopened']) or 'none'}."
@@ -433,6 +521,7 @@ def _llm_turn(s: Session, text: str, steps: list[Step]) -> tuple[str, bool, str 
     import anthropic
 
     client = anthropic.Anthropic()
+    user_text = text
     if s.active_pipe:
         text = f"{text}\n\n[context: active break pipe {s.active_pipe}]"
     s.messages.append({"role": "user", "content": text})
@@ -459,6 +548,11 @@ def _llm_turn(s: Session, text: str, steps: list[Step]) -> tuple[str, bool, str 
             break
         results = []
         for b in uses:
+            if b.name == "report_valve_condition" and not is_observation(user_text):
+                r = {"outcome": "refused", "reason": ("Not recorded: the user's message is a question or a what-if, "
+                                                      "not a crew observation. Use valve_status or the plan's contingencies.")}
+                results.append({"type": "tool_result", "tool_use_id": b.id, "content": json.dumps(r), "is_error": True})
+                continue
             r = _run_tool(s, b.name, dict(b.input), steps)
             results.append({"type": "tool_result", "tool_use_id": b.id, "content": _compact(r),
                             "is_error": r.get("outcome") in ("invalid_arguments", "error")})

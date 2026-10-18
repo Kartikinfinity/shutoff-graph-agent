@@ -49,6 +49,7 @@ class SessionIn(BaseModel):
 
 class ApproveIn(SessionIn):
     acknowledge: list[str] = Field(default_factory=list, max_length=10)
+    proposal_id: str | None = Field(default=None, max_length=20)
 
 
 class RestoreIn(SessionIn):
@@ -80,7 +81,7 @@ def chat(body: ChatIn) -> dict:
 
 @app.post("/api/approve")
 def approve(body: ApproveIn) -> dict:
-    return agent.approve(body.session, body.acknowledge)
+    return agent.approve(body.session, body.acknowledge, body.proposal_id)
 
 
 @app.post("/api/restore")

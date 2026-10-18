@@ -31,7 +31,7 @@ def test_tool_argument_validation_rejects_bad_ids_without_touching_the_db():
     assert T.call("plan_isolation", {"pipe_id": "P-107; MATCH (n) DETACH DELETE n"})["outcome"] == "invalid_arguments"
     assert T.call("check_closure_plan", {"pipe_id": "P-107", "valve_ids": ["V-1 OR 1=1"]})["outcome"] == "invalid_arguments"
     assert T.call("report_valve_condition", {"valve_id": "V-265", "condition": "melted"})["outcome"] == "invalid_arguments"
-    assert T.call("restore_service", {"work_order_id": "DROP"})["outcome"] == "invalid_arguments"
+    assert T.call("restore_service", {"work_order_id": "DROP", "confirmed_by_human": True})["outcome"] == "invalid_arguments"
     assert T.call("no_such_tool", {})["outcome"] == "error"
 
 
@@ -73,3 +73,22 @@ def test_reply_check_accepts_totals_and_counts_from_customer_names():
     steps = [Step("plan_isolation", {}, {"simulation": {"unintended": [
         {"name": "Willow Ct 400 block (14 homes)", "accounts": 14}, {"name": "dialysis", "accounts": 1}]}}, [], 1.0)]
     assert check_reply("15 accounts are cut off, including 14 homes on Willow Ct.", steps)[0]
+
+
+
+def test_restore_requires_human_confirmation():
+    r = T.call("restore_service", {"work_order_id": "WO-1001"})
+    assert r["outcome"] == "refused" and "human" in r["reason"]
+
+
+def test_issue_requires_the_impact_the_human_was_shown():
+    r = T.call("issue_work_order", {"pipe_id": "P-107", "valve_ids": ["V-212"], "confirmed_by_human": True})
+    assert r["outcome"] == "refused" and "impact" in r["reason"]
+
+
+def test_question_and_hypothesis_detection():
+    for t in ["Is V-265 seized?", "What if V-265 won't turn?", "If V-265 is stuck, what happens", "Could V-265 be seized",
+              "how do I restore WO-1001"]:
+        assert not agent.is_observation(t), t
+    for t in ["Crew: V-265 won't turn, it's seized", "Crew reports V-265 is seized", "V-212 and V-213 are stuck"]:
+        assert agent.is_observation(t), t

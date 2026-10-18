@@ -311,11 +311,13 @@ def issue_work_order(pipe_id: str, valve_ids: list[str], report: str = "",
     if expected is not None:
         was = (expected.get("accounts_out"), sorted(expected.get("critical_ids") or []))
         now_ = (sim["accounts_out"], critical_ids)
-        if was != now_:
+        affected_now = sorted({c["id"] for c in sim["intended"] + sim["unintended"]})
+        same_set = expected.get("affected_ids") is None or sorted(expected["affected_ids"]) == affected_now
+        if was != now_ or not same_set:
             return {"outcome": "refused", "stale": True,
                     "reason": (f"The impact changed since the plan was shown (was {was[0]} accounts, critical "
-                               f"{was[1] or 'none'}; now {now_[0]} accounts, critical {now_[1] or 'none'}). "
-                               "Re-plan before approving.")}
+                               f"{was[1] or 'none'}; now {now_[0]} accounts, critical {now_[1] or 'none'}"
+                               f"{'' if same_set else '; different customers affected'}). Re-plan before approving.")}
     if critical_ids and sorted(set(acknowledge_critical or [])) != critical_ids:
         return {"outcome": "needs_acknowledgement",
                 "critical": [{"id": cid, "name": name} for cid, name in critical],

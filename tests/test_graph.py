@@ -190,7 +190,7 @@ def test_offline_agent_conversation_end_to_end(fresh):
     r = agent.handle(sid, "Water gushing on Maple St between 2nd and 3rd Ave")
     assert r["mode"] == "offline" and r["proposal"]["valves"] == PLAN_A
     r = agent.handle(sid, "Crew wants to just close V-212 and V-213")
-    assert "does NOT isolate" in r["reply"]
+    assert "still connects the break" in r["reply"]
     assert N.open_work_orders() == []  # proposing or checking never closes anything
     r = agent.handle(sid, "V-265 won't turn")
     assert sorted(r["proposal"]["valves"]) == sorted(PLAN_B)
@@ -227,8 +227,24 @@ def test_mcp_server_exposes_the_same_tools_and_gates_destructive_ones(fresh):
         r = await server.call_tool("plan_isolation", {"pipe_id": "P-107"})
         assert json.loads(r.content[0].text)["outcome"] == "planned"
         r = await server.call_tool("issue_work_order", {"pipe_id": "P-107", "valve_ids": PLAN_A,
-                                                        "confirmed_by_human": False})
+                                                        "confirmed_by_human": False, "expected_accounts_out": 34})
         assert json.loads(r.content[0].text)["outcome"] == "refused"
+        try:  # the shown impact is a required argument of the MCP tool
+            await server.call_tool("issue_work_order", {"pipe_id": "P-107", "valve_ids": PLAN_A,
+                                                        "confirmed_by_human": True})
+            raise AssertionError("issue_work_order accepted a call without expected_accounts_out")
+        except AssertionError:
+            raise
+        except Exception:
+            pass
+        r = await server.call_tool("issue_work_order", {"pipe_id": "P-107", "valve_ids": PLAN_A,
+                                                        "confirmed_by_human": True, "expected_accounts_out": 34,
+                                                        "expected_critical_ids": []})
+        wo = json.loads(r.content[0].text)["work_order"]
+        r = await server.call_tool("restore_service", {"work_order_id": wo, "confirmed_by_human": False})
+        assert json.loads(r.content[0].text)["outcome"] == "refused"
+        r = await server.call_tool("restore_service", {"work_order_id": wo, "confirmed_by_human": True})
+        assert json.loads(r.content[0].text)["outcome"] == "restored"
 
     asyncio.run(go())
     assert N.open_work_orders() == []
@@ -444,3 +460,89 @@ def test_sandbox_survives_a_concurrent_background_save(fresh):
         except Exception:
             pass  # a save already in progress is fine: it is exactly the collision we want
         assert N.simulate(PLAN_A, "P-107")["isolated"] is True
+
+
+
+# ------------------------------------------------------------ independent review findings (18 Oct 2026)
+
+def _conditions():
+    return {r["id"]: (r["c"], r["s"]) for r in dbm.run("t", "MATCH (v:Valve) RETURN v.id AS id, v.condition AS c, 'Seized' IN labels(v) AS s")}
+
+
+def test_questions_and_hypotheticals_never_record_a_valve_condition(fresh):
+    sid = "q"
+    agent.SESSIONS.pop(sid, None)
+    agent.handle(sid, "Water gushing on Maple St between 2nd and 3rd Ave")
+    before = _conditions()
+    r = agent.handle(sid, "What if V-265 won't turn?")
+    assert "report_valve_condition" not in [s["tool"] for s in r["steps"]]
+    assert "Hypothetical" in r["reply"] and "66 accounts" in r["reply"] and "Nothing was recorded" in r["reply"]
+    r = agent.handle(sid, "Is V-265 seized?")
+    assert [s["tool"] for s in r["steps"]] == ["valve_status"] and "condition unknown" in r["reply"]
+    assert _conditions() == before
+    assert r["proposal"]["valves"] == PLAN_A  # the plan on screen is untouched
+    r = agent.handle(sid, "Crew reports V-265 is seized")  # an observation still records and re-plans
+    assert N.valve_info("V-265")["condition"] == "seized"
+    assert sorted(r["proposal"]["valves"]) == sorted(PLAN_B) and r["proposal"]["id"].endswith("-r2")
+
+
+def test_negated_or_question_restore_text_does_not_restore(fresh):
+    wo = N.issue_work_order("P-107", PLAN_A)["work_order"]
+    agent.SESSIONS.pop("r", None)
+    for text in [f"Do not restore {wo}.", f"How do I restore {wo}?", f"don't reopen {wo} yet"]:
+        r = agent.handle("r", text)
+        assert r["steps"] == [] and "No change made" in r["reply"], text
+        assert [w["id"] for w in N.open_work_orders()] == [wo]
+    r = agent.handle("r", f"restore {wo}")
+    assert r["steps"][0]["result"]["outcome"] == "restored"
+
+
+def test_failed_new_report_drops_the_previous_plan(fresh):
+    sid = "stale2"
+    agent.SESSIONS.pop(sid, None)
+    assert agent.handle(sid, "Water gushing on Maple St between 2nd and 3rd Ave")["proposal"]["valves"] == PLAN_A
+    r = agent.handle(sid, "Burst main on Elm St at 5th")
+    assert r["proposal"] is None and r["active_pipe"] is None
+    r = agent.handle(sid, "approve")
+    assert r["steps"] == [] and "no plan" in r["reply"].lower()
+    agent.handle(sid, "Water gushing on Maple St between 2nd and 3rd Ave")
+    r = agent.handle(sid, "Leak at Oak & 3rd")  # ambiguous
+    assert r["proposal"] is None
+    assert agent.approve(sid)["steps"] == []
+    assert N.open_work_orders() == []
+
+
+def test_approval_is_bound_to_the_plan_revision_on_screen(fresh):
+    sid = "rev"
+    agent.SESSIONS.pop(sid, None)
+    first = agent.handle(sid, "Water gushing on Maple St between 2nd and 3rd Ave")["proposal"]["id"]
+    second = agent.handle(sid, "Crew reports V-265 is seized")["proposal"]["id"]
+    assert first != second
+    r = agent.approve(sid, ["C-MED7"], proposal_id=first)  # the operator was looking at the old plan
+    assert r["steps"] == [] and "no longer the current plan" in r["reply"]
+    assert N.open_work_orders() == []
+    r = agent.approve(sid, ["C-MED7"], proposal_id=second)
+    assert r["steps"][0]["result"]["outcome"] == "issued"
+
+
+def test_approval_is_bound_to_the_exact_affected_customers(fresh):
+    r = N.issue_work_order("P-107", PLAN_A, expected={"accounts_out": 34, "critical_ids": [],
+                                                      "affected_ids": ["C-107", "C-136", "C-999"]})
+    assert r["outcome"] == "refused" and "different customers" in r["reason"]
+
+
+def test_llm_mode_cannot_record_a_condition_from_a_question(fresh, monkeypatch):
+    script = [
+        _Resp([_Block(type="tool_use", id="t1", name="report_valve_condition",
+                      input={"valve_id": "V-265", "condition": "seized"})], "tool_use"),
+        _Resp([_Block(type="text", text="I could not record that.")], "end_turn"),
+    ]
+    import anthropic
+
+    client_cls, _ = _fake_anthropic(script)
+    monkeypatch.setattr(anthropic, "Anthropic", client_cls)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-a-real-key")
+    monkeypatch.setenv("SHUTOFF_OFFLINE", "0")
+    agent.SESSIONS.pop("llmq", None)
+    agent.handle("llmq", "Is V-265 seized?")
+    assert N.valve_info("V-265")["condition"] == "unknown"

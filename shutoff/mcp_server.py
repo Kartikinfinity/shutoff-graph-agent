@@ -6,7 +6,10 @@
 
 Same catalogue and validation as the web agent (tools.py). The two
 state-changing actions are annotated as destructive and require
-confirmed_by_human=true, so the client must put a person in the loop.
+confirmed_by_human=true; issuing also requires the impact the human was
+shown. Trust boundary: confirmed_by_human is asserted by the MCP client
+(e.g. its own per-call approval prompt); this server does not authenticate
+the human. Report a valve condition is a non-destructive write.
 """
 
 from __future__ import annotations
@@ -57,6 +60,11 @@ def report_valve_condition(valve_id: str, condition: str, note: str = "") -> str
     return _out("report_valve_condition", {"valve_id": valve_id, "condition": condition, "note": note})
 
 
+@server.tool(description=T.TOOLS["valve_status"]["description"], annotations=READ)
+def valve_status(valve_id: str) -> str:
+    return _out("valve_status", {"valve_id": valve_id})
+
+
 @server.tool(description=T.TOOLS["supply_check"]["description"], annotations=READ)
 def supply_check(customer: str) -> str:
     return _out("supply_check", {"customer": customer})
@@ -73,19 +81,20 @@ def pipe_history(pipe_id: str) -> str:
 
 
 @server.tool(description=T.TOOLS["issue_work_order"]["description"], annotations=DESTRUCTIVE)
-def issue_work_order(pipe_id: str, valve_ids: list[str], confirmed_by_human: bool, report: str = "",
-                     acknowledge_critical: list[str] | None = None, expected_accounts_out: int | None = None,
-                     expected_critical_ids: list[str] | None = None) -> str:
+def issue_work_order(pipe_id: str, valve_ids: list[str], confirmed_by_human: bool, expected_accounts_out: int,
+                     expected_critical_ids: list[str] | None = None, expected_affected_ids: list[str] | None = None,
+                     acknowledge_critical: list[str] | None = None, report: str = "") -> str:
     return _out("issue_work_order", {"pipe_id": pipe_id, "valve_ids": valve_ids, "report": report,
                                      "confirmed_by_human": confirmed_by_human,
                                      "acknowledge_critical": acknowledge_critical or [],
                                      "expected_accounts_out": expected_accounts_out,
-                                     "expected_critical_ids": expected_critical_ids or []})
+                                     "expected_critical_ids": expected_critical_ids or [],
+                                     "expected_affected_ids": expected_affected_ids})
 
 
 @server.tool(description=T.TOOLS["restore_service"]["description"], annotations=DESTRUCTIVE)
-def restore_service(work_order_id: str) -> str:
-    return _out("restore_service", {"work_order_id": work_order_id})
+def restore_service(work_order_id: str, confirmed_by_human: bool) -> str:
+    return _out("restore_service", {"work_order_id": work_order_id, "confirmed_by_human": confirmed_by_human})
 
 
 if __name__ == "__main__":
