@@ -30,9 +30,15 @@ public-domain recordings. faster-whisper speech recognition was used only to che
 - Made the git commits from the participant's machine. They are recorded under the team's configured git identity,
   with a `Co-Authored-By: Claude` trailer.
 
-**What the participant did:**
-- Chose and approved the project direction (ShutOff, Track 1) from the proposed options.
-- _Participant statement: pending the participant's confirmation._
+**AI Assistance and Participant Contribution**
+
+Claude (Claude Code, model Claude Opus 5.5) was used extensively as a development assistant for ShutOff. It did the research, proposed the designs, generated and debugged the code, wrote the regression tests and documentation, and produced the demo video. Most of the code and documentation in this repository was written by Claude under my direction. I also obtained an independent review of the build from GPT, and its confirmed findings were fixed.
+
+My contribution was setting the direction and making the decisions. I chose the hackathon track (Track 1, Agents That Act on Connected Data). I chose ShutOff from the project options Claude researched and proposed, and I set the functional and usability priorities for the operator workflow. I decided which findings and changes to pursue, created the public repository, and approved each push to it.
+
+I made the final product and submission decisions. The project's claims and limitations are stated explicitly, including its synthetic water network, connectivity-only analysis and simulated operational actions.
+
+FalkorDB is central to the project's graph-based network reasoning. I am responsible for being able to explain the graph model, the main Cypher queries, the architecture and the safety constraints, and I am reviewing them using `docs/EXPLAINER.md`.
 
 **Verification:**
 - The test suite runs against a real FalkorDB instance. Results are whatever `python -m pytest -q` prints; no results
