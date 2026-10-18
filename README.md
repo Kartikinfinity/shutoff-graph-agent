@@ -216,6 +216,10 @@ Create the environment and install dependencies:
 ```bash
 python -m venv .venv
 ```
+On Windows with several Python versions installed, plain `python` may not be 3.12. Use the launcher to choose it:
+```bash
+py -3.12 -m venv .venv
+```
 ```bash
 .venv/Scripts/python -m pip install -r requirements.txt
 ```

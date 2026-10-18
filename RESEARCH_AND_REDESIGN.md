@@ -1,7 +1,7 @@
 # ShutOff: research findings and redesign decisions (18 Oct 2026)
 
 Inputs:
-- The independent review ([output/ShutOff-final-independent-review.md](output/ShutOff-final-independent-review.md); kept out of git).
+- An independent review of commit `54e5e78` (a GPT-generated audit supplied by the team; not included in this repository).
 - The actual code at commit `f588ce2`.
 - About 45 minutes of targeted research in official and primary sources.
 
