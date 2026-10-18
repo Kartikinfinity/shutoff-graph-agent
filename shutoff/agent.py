@@ -99,7 +99,12 @@ def _update_state(s: Session, name: str, args: dict, result: dict) -> None:
         s.last_plan = None
         s.active_pipe = result["pipe"] if result.get("outcome") == "found" else None
     if name == "plan_isolation":
-        if result.get("outcome") == "planned":
+        if result.get("outcome") == "planned" and not result["close"]:
+            # Already isolated by valves closed in the graph: nothing to approve.
+            s.active_pipe = result["pipe"]["id"]
+            s.proposal = None
+            s.last_plan = result
+        elif result.get("outcome") == "planned":
             s.active_pipe = result["pipe"]["id"]
             s.rev += 1
             sim = result["simulation"]
@@ -407,6 +412,9 @@ def summarize(tool: str, r: dict) -> str:
         sim = r["simulation"]
         pipe = r["pipe"]
         valves = ", ".join(v["id"] for v in r["close"])
+        if not r["close"] and sim["isolated"]:
+            return (f"Break on {pipe['label']} ({pipe['id']}) is already disconnected by valves closed in the graph "
+                    "(an active work order). No new valves are needed; nothing to approve.")
         parts = [f"Break on {pipe['label']} ({pipe['id']}). Proposed: close {valves}. In simulation "
                  f"{sim['accounts_out']} accounts would lose water"]
         if sim["unintended"]:

@@ -14,7 +14,7 @@ State of this baseline: 40/40 tests pass, the app starts, and the live Claude AP
 > - The UI was redesigned around the operator workflow.
 > - ShutOff's segment query was cross-checked against WNTR on public EPANET networks ([docs/BENCHMARK_WNTR.md](docs/BENCHMARK_WNTR.md)).
 >
-> Tests: 49 core + 3 optional benchmark tests. File list additions: `benchmarks/`, `tests/test_benchmark.py`,
+> Tests: 50 core + 3 optional benchmark tests. File list additions: `benchmarks/`, `tests/test_benchmark.py`,
 > `requirements-benchmark.txt`, `RESEARCH_AND_REDESIGN.md`.
 
 ---

@@ -123,7 +123,7 @@ function applyResponse(r, text) {
           ov.critical = {};
           for (const c of res.simulation.critical_status) ov.critical[c.id] = c.supplied;
           S.inc = { ...S.inc, pipe: res.pipe.id, label: res.pipe.label,
-            state: res.outcome === "cannot_isolate" ? "cannot" : (res.simulation.critical_out.length ? "ack" : "ready") };
+            state: res.outcome === "cannot_isolate" ? "cannot" : !res.close.length ? "isolated" : (res.simulation.critical_out.length ? "ack" : "ready") };
         } else {
           S.plan = null; S.inc = { state: "locate", report: text, locate: res };
         }
@@ -234,7 +234,7 @@ function renderStrip() {
   const states = {
     idle: ["idle", "No incident"], locate: ["attention", "Location needed"], working: ["working", "Working"],
     ready: ["ready", "Simulation ready"], ack: ["ack", "Needs acknowledgement"], cannot: ["ack", "Cannot isolate"],
-    issued: ["issued", "Work order recorded"], restored: ["idle", "Service restored"],
+    issued: ["issued", "Work order recorded"], restored: ["idle", "Service restored"], isolated: ["issued", "Already isolated"],
   };
   const [ds, label] = states[inc.state] || states.idle;
   chip.dataset.state = ds; chip.textContent = label;
@@ -253,7 +253,7 @@ function renderStrip() {
     if (S.observation) bits.push(`Crew observation: ${S.observation.valve} ${S.observation.condition} (${S.observation.at})`);
     sub.textContent = bits.join(" · ");
   }
-  const show = S.plan && ["ready", "ack", "cannot", "issued"].includes(inc.state);
+  const show = S.plan && ["ready", "ack", "cannot", "issued", "isolated"].includes(inc.state);
   $("#kpis").hidden = !show;
   if (show) {
     const k = kpisOf(S.plan), p = S.prevKpis;
@@ -308,7 +308,10 @@ function renderMap() {
     if (n.id.endsWith("0")) el("text", { x: n.x + 85, y: n.y - 10, class: "street", "text-anchor": "middle" }, gStreets).textContent = street.toUpperCase();
     if (n.id[2] === "0") el("text", { x: n.x, y: n.y - 32, class: "street", "text-anchor": "middle" }, gStreets).textContent = ave.toUpperCase();
   }
-  if (by["J-WE"]) el("text", { x: by["J-WE"].x, y: by["J-WE"].y + 24, class: "street", "text-anchor": "middle" }, gStreets).textContent = "WILLOW CT";
+  if (by["J-WE"] && by["J-WT"]) {  // label runs along the cul-de-sac, clear of the other markers
+    const x = by["J-WE"].x - 9, y = (by["J-WE"].y + by["J-WT"].y) / 2;
+    el("text", { x, y, class: "street", "text-anchor": "middle", transform: `rotate(-90 ${x} ${y})` }, gStreets).textContent = "WILLOW CT";
+  }
 
   for (const e of net.edges) {
     const a = by[e.a], b = by[e.b];
@@ -513,8 +516,10 @@ function planHtml() {
   const p = S.plan, sim = p.simulation, issued = S.inc.state === "issued" || S.inc.state === "restored";
   let h = "";
   const restored = S.inc.state === "restored";
+  const already = sim.isolated && !p.close.length && !issued;
   h += `<div class="sec">${!sim.isolated
     ? verdict("bad", "No combination of operable valves isolates this break", "Field crews must find another isolation point.")
+    : already ? verdict("info", "Already isolated by valves closed in the graph", "An active work order already disconnects this main. No new valves are needed.")
     : restored ? verdict("info", "Service restored", "The plan below is shown for reference only.")
     : issued ? verdict("good", "Approved plan, recorded in the graph", "The work order marked these valves closed. Dispatch and notices are simulated.")
     : verdict("good", "In simulation the break would be disconnected from every source", "Computed on a copy of the graph: proposed valves removed, connectivity re-checked. Nothing has changed yet.")}</div>`;
@@ -628,7 +633,7 @@ function renderDock() {
     h += msg;
     h += `<div class="dock-summary"><b>${esc(p.pipe.label)}</b> · plan <span class="mono">${esc(S.proposal.id)}</span><br>${p.close.length} valves · ${p.simulation.accounts_out} accounts would lose water` +
       (crit.length ? ` · <b style="color:var(--loss)">${crit.length} critical</b>` : " · no critical customer") + `</div>`;
-    if (crit.length) h += `<label class="ack"><input type="checkbox" id="ack"><span>I acknowledge that <b>${esc(crit.map((c) => c.name).join(", "))}</b> would lose its water supply, and that a priority notice and alternate supply are needed.</span></label>`;
+    if (crit.length) h += `<label class="ack"><input type="checkbox" id="ack" aria-label="Acknowledge the critical customer impact"><span>I acknowledge that <b>${esc(crit.map((c) => c.name).join(", "))}</b> would lose its water supply, and that a priority notice and alternate supply are needed.</span></label>`;
     h += `<button type="button" class="primary" id="approve" ${crit.length ? "disabled" : ""}>Approve simulated work order</button>`;
     if (S.dockMsg && S.dockMsg.stale) h += `<button type="button" class="secondary" id="replan">Re-plan with the current network</button>`;
     h += `<div class="dock-note">The server re-checks the plan before recording it. Recording marks valves closed in the graph; no crew is dispatched and no message is sent.</div>`;
@@ -641,6 +646,8 @@ function renderDock() {
   } else if (inc.state === "restored" && S.restored) {
     const r = S.restored;
     h += verdict("info", `${esc(r.work_order)} restored`, `Re-opened ${esc(r.reopened.join(", ") || "none")}` + (r.kept_closed.length ? `; kept ${esc(r.kept_closed.map((k) => k.valve).join(", "))} closed for another active break` : "") + ".");
+  } else if (inc.state === "isolated") {
+    h += verdict("info", "Nothing to approve", "This break is already isolated by an active work order.");
   } else if (inc.state === "cannot") {
     h += verdict("bad", "Nothing to approve", "The graph shows no isolation with operable valves.");
   } else if (msg) {

@@ -102,7 +102,8 @@ def reset() -> dict:
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(WEB / "index.html")
+    # Always revalidate the page so a new build's asset versions are picked up.
+    return FileResponse(WEB / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 app.mount("/static", StaticFiles(directory=WEB), name="static")

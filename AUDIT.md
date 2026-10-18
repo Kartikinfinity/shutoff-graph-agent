@@ -162,5 +162,5 @@ Wording and claims were corrected in the UI, the replies and the docs: simulated
 pressure"; "valves to close" with no implied sequence; the Blast Radius comparison; observations persist. The UI was
 redesigned and the WNTR cross-check added. Full details are in [RESEARCH_AND_REDESIGN.md](RESEARCH_AND_REDESIGN.md).
 
-**Test evidence (18 Oct):** 49 core tests + 3 WNTR benchmark tests pass against FalkorDB, with 0 skipped in this
+**Test evidence (18 Oct):** 50 core tests + 3 WNTR benchmark tests pass against FalkorDB, with 0 skipped in this
 environment (WNTR installed).

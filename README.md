@@ -244,7 +244,7 @@ Optional: add the WNTR cross-check tests (3 more):
 .venv/Scripts/python -m pip install -r requirements-benchmark.txt
 ```
 
-The core suite has 49 tests. Integration tests are skipped when FalkorDB is unreachable, so check that nothing is skipped except the optional benchmark module (which needs WNTR). They cover:
+The core suite has 50 tests. Integration tests are skipped when FalkorDB is unreachable, so check that nothing is skipped except the optional benchmark module (which needs WNTR). They cover:
 - the union-find cross-check;
 - the Plan A / Plan B / crew-plan numbers, and leak paths made of real pipe links;
 - copies never changing the live graph;
@@ -254,7 +254,7 @@ The core suite has 49 tests. Integration tests are skipped when FalkorDB is unre
 - the HTTP API and the MCP gating;
 - the model loop with a **mocked** client.
 
-## Demo (about 2 minutes)
+## Demo (video about 75 seconds)
 
 `demo/shutoff-demo.webm` is recorded by [`demo/record_demo.py`](demo/record_demo.py) with Playwright, through the real UI,
 against FalkorDB. Captions are overlays. To rehearse it yourself (click *Reset demo* first):

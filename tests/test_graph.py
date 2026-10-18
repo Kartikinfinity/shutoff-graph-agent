@@ -550,3 +550,13 @@ def test_llm_mode_cannot_record_a_condition_from_a_question(fresh, monkeypatch):
     agent.SESSIONS.pop("llmq", None)
     agent.handle("llmq", "Is V-265 seized?")
     assert N.valve_info("V-265")["condition"] == "unknown"
+
+
+def test_break_already_isolated_by_an_active_work_order_has_nothing_to_approve(fresh):
+    N.issue_work_order("P-107", PLAN_A)
+    agent.SESSIONS.pop("again", None)
+    r = agent.handle("again", "Water gushing on Maple St between 2nd and 3rd Ave")
+    plan = next(s for s in r["steps"] if s["tool"] == "plan_isolation")["result"]
+    assert plan["close"] == [] and plan["simulation"]["isolated"] is True
+    assert r["proposal"] is None and "nothing to approve" in r["reply"]
+    assert agent.approve("again")["steps"] == []
