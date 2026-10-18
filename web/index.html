@@ -5,70 +5,119 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ShutOff · Main Break Isolation</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script>
+    // Apply the saved or system theme before first paint.
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem("shutoff-theme"); } catch (e) {}
+      if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
 </head>
 <body>
-  <header class="topbar">
+  <header class="appbar">
     <div class="brand">
-      <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5c3.6 4.4 6 7.9 6 11a6 6 0 0 1-12 0c0-3.1 2.4-6.6 6-11z" fill="currentColor"/><rect x="5" y="12.2" width="14" height="2.6" rx="1.3" fill="#fff"/></svg>
+      <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5c3.6 4.4 6 7.9 6 11a6 6 0 0 1-12 0c0-3.1 2.4-6.6 6-11z" fill="currentColor"/><rect x="5" y="12.2" width="14" height="2.6" rx="1.3" fill="var(--appbar)"/></svg>
       <div>
         <h1>ShutOff</h1>
-        <p>Main-break isolation agent · Riverbend Water</p>
+        <p>Main-break isolation · Riverbend Water</p>
       </div>
     </div>
-    <div class="badges">
-      <span class="badge warn" title="Every pipe, valve, customer and incident here is invented.">Synthetic network</span>
-      <span class="badge" id="mode-badge">…</span>
-      <span class="badge" id="db-badge">FalkorDB …</span>
-      <button class="ghost" id="reset-btn" title="Reload the synthetic network and clear all field reports">Reset demo</button>
+    <div class="appbar-right">
+      <span class="pill warn" title="Every pipe, valve, customer and incident here is invented.">Simulated network</span>
+      <span class="pill" id="mode-pill">…</span>
+      <span class="pill" id="db-pill">FalkorDB …</span>
+      <button class="icon-btn" id="theme-btn" type="button" aria-label="Switch to dark theme" title="Theme">
+        <svg viewBox="0 0 24 24" class="i-moon" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor"/></svg>
+        <svg viewBox="0 0 24 24" class="i-sun" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></g></svg>
+      </button>
+      <button class="ghost-btn" id="reset-btn" type="button" title="Reload the synthetic network and clear field reports and work orders">Reset demo</button>
     </div>
   </header>
 
-  <main class="layout">
-    <section class="panel chat" aria-label="Incident conversation">
-      <div class="panel-head"><h2>Incident line</h2><span class="hint">dispatcher · crews · supervisor</span></div>
-      <div id="log" class="log" aria-live="polite"></div>
-      <div class="chips" id="chips">
-        <button data-msg="Caller reports water gushing on Maple St between 2nd and 3rd Ave">Report break on Maple St</button>
-        <button data-msg="Crew wants to just close V-212 and V-213, is that enough?">Check crew's 2-valve plan</button>
-        <button data-msg="Crew: V-265 won't turn, it's seized">V-265 is seized</button>
-        <button data-msg="Is the hospital still supplied?">Hospital supplied?</button>
-        <button data-msg="Which valves should we exercise first?">Valves to exercise</button>
-        <button data-msg="Burst main on Elm St at 5th">Unknown street</button>
+  <section class="strip" id="strip" aria-live="polite">
+    <div class="strip-main">
+      <span class="state" id="state-chip" data-state="idle">No incident</span>
+      <div class="strip-text">
+        <div class="strip-title" id="strip-title">Report a main break to start</div>
+        <div class="strip-sub" id="strip-sub">ShutOff locates the main, computes which valves isolate it and simulates the impact before anything changes.</div>
       </div>
-      <form id="composer" class="composer">
-        <input id="input" autocomplete="off" maxlength="500" placeholder="Describe the break, a crew report, or a question…" aria-label="Message">
+    </div>
+    <div class="kpis" id="kpis" hidden>
+      <div class="kpi"><span class="kpi-label">Valves to close</span><b id="k-valves">–</b><span class="delta" id="d-valves"></span></div>
+      <div class="kpi"><span class="kpi-label">Accounts affected</span><b id="k-accounts">–</b><span class="delta" id="d-accounts"></span></div>
+      <div class="kpi" id="kpi-critical"><span class="kpi-label">Critical cut off</span><b id="k-critical">–</b><span class="delta" id="d-critical"></span></div>
+    </div>
+    <button class="ghost-btn log-toggle" id="log-toggle" type="button" aria-controls="log-pane" aria-expanded="false">Log</button>
+    <div class="progress" id="progress" hidden><span></span></div>
+  </section>
+
+  <nav class="tabs" id="tabs" aria-label="Views">
+    <button type="button" data-view="plan" aria-pressed="true">Plan</button>
+    <button type="button" data-view="map" aria-pressed="false">Map</button>
+    <button type="button" data-view="log" aria-pressed="false">Log</button>
+  </nav>
+
+  <main class="workspace" id="workspace" data-view="plan">
+    <aside class="pane log-pane" id="log-pane" aria-label="Incident log">
+      <div class="pane-head"><h2>Incident log</h2></div>
+      <ol class="log" id="log"></ol>
+      <div class="starter" id="starter">
+        <button class="primary" type="button" data-msg="Caller reports water gushing on Maple St between 2nd and 3rd Ave">Report a break on Maple St</button>
+        <details class="more">
+          <summary>More demo inputs</summary>
+          <div class="chips">
+            <button type="button" data-msg="Crew wants to just close V-212 and V-213, is that enough?">Crew proposes V-212 + V-213</button>
+            <button type="button" data-msg="What if V-265 won't turn?">What if V-265 won't turn?</button>
+            <button type="button" data-msg="Crew reports V-265 is seized">Crew reports V-265 seized</button>
+            <button type="button" data-msg="Is the hospital still supplied?">Is the hospital supplied?</button>
+            <button type="button" data-msg="Burst main on Elm St at 5th">Unknown street</button>
+            <button type="button" data-msg="Leak at Oak & 3rd">Ambiguous location</button>
+            <button type="button" data-msg="Which valves should we exercise first?">Valves to exercise</button>
+          </div>
+        </details>
+      </div>
+      <form class="composer" id="composer">
+        <label class="sr-only" for="input">Report or question</label>
+        <input id="input" autocomplete="off" maxlength="500" placeholder="Describe a break, a crew observation or a question">
         <button type="submit" class="primary">Send</button>
       </form>
-    </section>
+    </aside>
 
-    <section class="panel mapwrap" aria-label="Network map">
-      <div class="panel-head">
-        <h2>Network</h2>
-        <div class="legend">
-          <span><i class="sw main"></i>in service</span>
-          <span><i class="sw seg"></i>shut off (segment)</span>
-          <span><i class="sw cut"></i>cut off (unintended)</span>
-          <span><i class="sw path"></i>supply path</span>
-          <span><i class="sw leak"></i>leak path</span>
-          <span><i class="vk open"></i>valve</span>
-          <span><i class="vk toclose"></i>to close</span>
-          <span><i class="vk closed"></i>closed</span>
-          <span><i class="vk seized"></i>seized</span>
+    <section class="pane map-pane" id="map-pane" aria-label="Network map">
+      <div class="mapbox" id="mapbox">
+        <div class="map-tools">
+          <button type="button" class="tool-btn" id="fit-incident" disabled>Fit incident</button>
+          <button type="button" class="tool-btn" id="fit-network">Fit network</button>
+          <button type="button" class="tool-btn" id="clear-focus" hidden>Clear highlight</button>
         </div>
+        <svg id="map" viewBox="-40 30 1220 660" role="img" aria-label="Schematic map of the simulated Riverbend water network"></svg>
+        <div class="map-info" id="info" hidden></div>
+        <div class="preview-tag" id="preview-tag" hidden></div>
       </div>
-      <div class="mapbox">
-        <svg id="map" viewBox="-30 40 1200 640" role="img" aria-label="Riverbend water network map"></svg>
-        <div id="tip" class="tip" hidden></div>
+      <div class="map-foot">
+        <span class="schematic-note">Simulated network · schematic layout, not geographic coordinates</span>
+        <ul class="legend" aria-label="Map legend">
+          <li><i class="ln water"></i>In service</li>
+          <li><i class="ln proposed"></i>Would be shut off</li>
+          <li><i class="ln loss"></i>Would lose supply (outside area)</li>
+          <li><i class="ln out"></i>Out of service (work order)</li>
+          <li><i class="ln path"></i>Source path</li>
+          <li><i class="ln leak"></i>Path still feeding break</li>
+          <li><i class="vk"></i>Valve</li>
+          <li><i class="vk proposed"></i>To close</li>
+          <li><i class="vk closed"></i>Closed in graph</li>
+          <li><i class="vk seized"></i>Reported seized</li>
+        </ul>
       </div>
-      <div id="wo-bar" class="wo-bar"></div>
+      <div class="wo-bar" id="wo-bar" hidden></div>
     </section>
 
-    <section class="panel side" aria-label="Plan and evidence">
-      <div class="panel-head"><h2>Isolation plan</h2></div>
-      <div id="plan" class="plan empty">No active break. Report one on the incident line.</div>
-      <div class="panel-head sub"><h2>Graph evidence</h2><span class="hint">every query the agent ran</span></div>
-      <div id="evidence" class="evidence"><p class="muted">Tool calls and Cypher appear here.</p></div>
-    </section>
+    <aside class="pane rail" id="rail" aria-label="Isolation plan and approval">
+      <div class="rail-scroll" id="plan"></div>
+      <div class="dock" id="dock" hidden></div>
+    </aside>
   </main>
 
   <script src="/static/app.js"></script>

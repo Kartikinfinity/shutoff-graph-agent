@@ -170,6 +170,16 @@ def approve(sid: str, acknowledge: list[str] | None = None, proposal_id: str | N
             "steps": [st.__dict__ for st in steps], "proposal": s.proposal, "active_pipe": s.active_pipe}
 
 
+def replan(sid: str) -> dict:
+    """Re-run the plan for the active incident (e.g. after the network changed)."""
+    s = session(sid)
+    steps: list[Step] = []
+    if not s.active_pipe:
+        return _reply(s, "There is no active incident to re-plan. Report the break location first.", steps)
+    r = _run_tool(s, "plan_isolation", {"pipe_id": s.active_pipe}, steps)
+    return _reply(s, summarize("plan_isolation", r), steps)
+
+
 def restore(sid: str, wo: str) -> dict:
     s = session(sid)
     steps: list[Step] = []

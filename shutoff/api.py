@@ -84,6 +84,11 @@ def approve(body: ApproveIn) -> dict:
     return agent.approve(body.session, body.acknowledge, body.proposal_id)
 
 
+@app.post("/api/replan")
+def replan(body: SessionIn) -> dict:
+    return agent.replan(body.session)
+
+
 @app.post("/api/restore")
 def restore(body: RestoreIn) -> dict:
     return agent.restore(body.session, body.work_order)

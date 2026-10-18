@@ -443,7 +443,11 @@ def test_http_api_end_to_end(fresh):
         c.post("/api/chat", json={"session": "http", "text": "V-265 won't turn"})
         r = c.post("/api/approve", json={"session": "http"}).json()
         assert r["steps"][0]["result"]["outcome"] == "needs_acknowledgement"
-        r = c.post("/api/approve", json={"session": "http", "acknowledge": ["C-MED7"]}).json()
+        r = c.post("/api/replan", json={"session": "http"}).json()
+        assert r["steps"][0]["tool"] == "plan_isolation" and r["proposal"]["id"].endswith("-r3")
+        r = c.post("/api/approve", json={"session": "http", "acknowledge": ["C-MED7"], "proposal_id": "IR1-r2"}).json()
+        assert r["steps"] == [] and "no longer the current plan" in r["reply"]
+        r = c.post("/api/approve", json={"session": "http", "acknowledge": ["C-MED7"], "proposal_id": "IR1-r3"}).json()
         wo = r["steps"][0]["result"]["work_order"]
         assert c.get("/api/network").json()["work_orders"][0]["id"] == wo
         r = c.post("/api/restore", json={"session": "http", "work_order": wo}).json()
