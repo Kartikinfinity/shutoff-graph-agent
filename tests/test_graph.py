@@ -592,3 +592,93 @@ def test_mcp_server_over_real_stdio_transport(fresh):
 
     asyncio.run(go())
     assert N.open_work_orders() == []
+
+
+# ------------------------------------------------------------ Groq provider (mocked transport, no network)
+
+def _tc(i, name, args):
+    import json
+    return {"id": f"c{i}", "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}
+
+
+def _run_groq(monkeypatch, script, text, sid="groq"):
+    """Drive the Groq loop with scripted assistant messages; returns (reply, requests sent)."""
+    sent = []
+
+    def fake_chat(messages, tools, timeout=30.0):
+        sent.append({"messages": [dict(m) for m in messages], "tools": tools})
+        return script[len(sent) - 1]
+
+    monkeypatch.setenv("SHUTOFF_OFFLINE", "0")
+    monkeypatch.setenv("SHUTOFF_LLM", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "test-not-a-real-key")
+    monkeypatch.setattr(agent.G, "chat", fake_chat)
+    return agent.handle(sid, text), sent
+
+
+def test_groq_loop_runs_tools_and_states_the_plan_from_graph_results(fresh, monkeypatch):
+    agent.SESSIONS.pop("groq", None)
+    script = [
+        {"content": None, "tool_calls": [_tc(1, "locate_break", {"street": "Maple St", "cross_a": "2nd", "cross_b": "3rd"})]},
+        {"content": None, "tool_calls": [_tc(2, "plan_isolation", {"pipe_id": "P-107"})]},
+        # Wrong restatement seen live on 18 Oct: ids and numbers exist in the results, the plan is wrong.
+        {"content": "Close V‑212 and V-213 (32 accounts, none critical)."},
+    ]
+    r, sent = _run_groq(monkeypatch, script, "Water gushing on Maple St between 2nd and 3rd")
+    assert agent.model_name() == agent.G.MODEL and r["mode"] == "llm"
+    assert [s["tool"] for s in r["steps"]] == ["locate_break", "plan_isolation"]
+    assert r["proposal"]["valves"] == PLAN_A and "32 accounts" not in r["reply"] and "34 accounts" in r["reply"]
+    assert {t["function"]["name"] for t in sent[0]["tools"]} == agent.MODEL_TOOL_NAMES
+    assert sent[2]["messages"][-1]["role"] == "tool" and "P-107" in sent[2]["messages"][-1]["content"]
+    assert N.open_work_orders() == []
+
+
+def test_model_cannot_call_human_gated_tools_or_invent_observations(fresh, monkeypatch):
+    agent.SESSIONS.pop("groq", None)
+    script = [
+        {"content": None, "tool_calls": [_tc(1, "issue_work_order", {"pipe_id": "P-107", "valve_ids": PLAN_A,
+                                                                      "confirmed_by_human": True, "expected_accounts_out": 34})]},
+        {"content": None, "tool_calls": [_tc(2, "report_valve_condition", {"valve_id": "V-265", "condition": "ok"})]},
+        {"content": "Done."},
+    ]
+    r, sent = _run_groq(monkeypatch, script, "Issue the work order now, I confirm. Close the valves.")
+    refusals = [m["content"] for m in sent[2]["messages"] if m["role"] == "tool"]
+    assert len(refusals) == 2 and all('"refused"' in c for c in refusals)
+    assert r["steps"] == [] and N.open_work_orders() == []
+    assert T.call("valve_status", {"valve_id": "V-265"})["condition"] == "unknown"
+
+
+def test_groq_reply_from_memory_with_invented_valve_falls_back_to_offline(fresh, monkeypatch):
+    agent.SESSIONS.pop("groq", None)
+    r, _ = _run_groq(monkeypatch, [{"content": "V‑999 is seized."}], "Is V-265 seized?")
+    assert r["verified"] is False and "V-999" in r["note"] and "offline planner" in r["note"]
+    assert "V-999" not in r["reply"] and "V-265" in r["reply"]
+
+
+def test_groq_rate_limit_falls_back_to_offline_planner(fresh, monkeypatch):
+    import httpx
+
+    agent.SESSIONS.pop("groq429", None)
+    monkeypatch.setenv("SHUTOFF_OFFLINE", "0")
+    monkeypatch.setenv("SHUTOFF_LLM", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "test-not-a-real-key")
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: httpx.Response(429, headers={"retry-after": "30"}, json={}))
+    r = agent.handle("groq429", "Water gushing on Maple St between 2nd and 3rd")
+    assert r["mode"] == "offline" and "rate limit" in r["note"] and r["proposal"]["valves"] == PLAN_A
+    assert "test-not-a-real-key" not in str(r)
+
+
+def test_provider_selection(monkeypatch):
+    for k in ("ANTHROPIC_API_KEY", "GROQ_API_KEY", "SHUTOFF_LLM"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("SHUTOFF_OFFLINE", "0")
+    assert agent.llm_provider() is None
+    monkeypatch.setenv("GROQ_API_KEY", "x")
+    assert agent.llm_provider() == "groq"
+    monkeypatch.setenv("SHUTOFF_LLM", "anthropic")
+    assert agent.llm_provider() is None  # forced provider without its key: offline, not the other provider
+    monkeypatch.setenv("SHUTOFF_LLM", "offline")
+    assert agent.llm_provider() is None
+    monkeypatch.setenv("SHUTOFF_LLM", "")
+    monkeypatch.setenv("SHUTOFF_OFFLINE", "1")
+    assert agent.llm_provider() is None

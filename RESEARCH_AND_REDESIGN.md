@@ -110,7 +110,7 @@ Other design points:
 ## 8. Remaining limitations
 
 - Synthetic network, connectivity only, valves modelled as two-way isolation points, no pressure zones or check valves.
-- The deterministic parser understands a limited set of phrasings. Claude mode has not been run against the live API.
+- The deterministic parser understands a limited set of phrasings. Claude mode has not been run against the live API. (Later on 18 Oct the Groq `openai/gpt-oss-20b` mode was live-tested; see `docs/LIVE_LLM_TEST.md`.)
 - The approval safeguards are logical checks for one local operator. There are no authenticated users, no atomic transactions and no concurrent-operator safety.
 - `confirmed_by_human` on MCP is asserted by the client.
 - The valve-exercise ranking is a transparent heuristic, not a calibrated risk model.

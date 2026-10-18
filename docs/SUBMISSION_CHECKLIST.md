@@ -20,7 +20,7 @@ Rules to double-check:
 
 Before you submit:
 
-- [ ] `docker compose up -d`, `python -m shutoff.seed`, `python -m pytest -q` (51 core tests; +3 if WNTR is installed) all pass on your machine, with no integration tests skipped
+- [ ] `docker compose up -d`, `python -m shutoff.seed`, `python -m pytest -q` (56 core tests; +3 if WNTR is installed) all pass on your machine, with no integration tests skipped
 - [ ] Run the demo once yourself in the browser (http://localhost:8000)
 - [ ] Watch the demo video end to end
 - [ ] Optional: blog post for the AirPods side prize (write it in your own words)

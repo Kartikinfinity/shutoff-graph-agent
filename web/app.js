@@ -42,8 +42,8 @@ async function loadHealth() {
     db.textContent = h.falkordb ? `FalkorDB · ${h.nodes} nodes` : "FalkorDB unreachable";
     db.className = "pill " + (h.falkordb ? "ok" : "bad");
     const m = $("#mode-pill");
-    m.textContent = h.mode === "llm" ? "Live model (Claude)" : "Deterministic planner";
-    m.title = h.mode === "llm" ? "Claude selects the fixed graph tools; IDs and counts in its reply are checked against tool results."
+    m.textContent = h.mode === "llm" ? `Live model (${h.model})` : "Deterministic planner";
+    m.title = h.mode === "llm" ? "The model selects the fixed graph tools; IDs and counts in its reply are checked against tool results. Approval stays with the supervisor."
       : "No model API key configured: a deterministic parser selects the same fixed graph tools.";
     return h.falkordb;
   } catch (e) {

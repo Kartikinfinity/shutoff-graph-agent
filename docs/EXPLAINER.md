@@ -49,7 +49,7 @@ Questions and what-ifs never change it.
 - A message comes in ("water gushing on Maple St between 2nd and 3rd").
 - A planner chooses **tools** from a fixed list: `locate_break`, `plan_isolation`, `check_closure_plan`, `report_valve_condition`, `supply_check`, `valve_exercise_priorities`, `pipe_history`.
 - **Offline mode** (default): simple keyword rules choose the tools. Fully deterministic.
-- **LLM mode** (when `ANTHROPIC_API_KEY` is set): Claude chooses the tools. Its final sentence is checked. If it mentions a valve ID or a number the graph didn't return, it is thrown away and replaced with a summary built from the tool results.
+- **LLM mode** (when `GROQ_API_KEY` or `ANTHROPIC_API_KEY` is set): the model (Groq `openai/gpt-oss-20b`, live-tested; or Claude, mock-tested only) chooses the tools. For plan tools the reply is built from the graph results, because in the live test the model misstated a plan. For read-only answers its wording is kept, but only if every valve ID and number in it came from the graph; otherwise it is replaced. It can never call `issue_work_order` or `restore_service`, and it can record a valve condition only when the message names that valve with that condition.
 - The model **never writes Cypher**. It only fills tool arguments, which are validated (e.g. `V-\d{3}`) and looked up in the graph first.
 - **Acting**: closing valves happens only when a human presses *Approve*. The server then runs the simulation again. It refuses if the break would still be fed, a valve is seized, or the impact differs from what the human saw. If a critical customer loses water, the human must tick an acknowledgement naming that customer, and the server checks the IDs. Then it writes `WorkOrder`, `CLOSES` and `NOTIFIES` into the graph.
 - **Restoring** re-opens valves one at a time on a sandbox first. If re-opening a valve would re-feed another active break, it stays closed and is handed to that break's work order.
@@ -84,8 +84,10 @@ Questions and what-ifs never change it.
 | `shutoff/queries.py` | Every Cypher query |
 | `shutoff/network.py` | Planning, sandbox simulation, contingencies, actions |
 | `shutoff/tools.py` | Tool catalogue + validation (shared by web agent and MCP) |
-| `shutoff/agent.py` | Offline planner, Claude tool loop, reply check |
+| `shutoff/agent.py` | Offline planner, LLM tool loops (Claude, Groq), shared tool guard, reply check |
+| `shutoff/llm_groq.py` | Groq API transport (rate-limit and error handling) |
 | `shutoff/api.py`, `web/` | Web app |
 | `shutoff/mcp_server.py` | MCP server |
-| `tests/` | 51 core tests + 3 optional WNTR benchmark tests |
+| `tests/` | 56 core tests + 3 optional WNTR benchmark tests |
 | `benchmarks/wntr_crosscheck.py` | Compares ShutOff's segment query with WNTR on public EPANET networks |
+| `deploy/` | Optional one-container image for free hosting (tested locally, not deployed) |

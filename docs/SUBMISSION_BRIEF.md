@@ -1,81 +1,83 @@
 # Submission brief (copy-ready text for the WeMakeDevs form)
 
-The submission form sits behind the WeMakeDevs sign-in, so its exact fields could not be inspected. The text below
-covers the fields hackathon forms usually ask for. Paste only the parts the form asks for. Every claim below is
-backed by the repository: the tests, the benchmark, or the video.
+**Form fields** (from the participant's screenshots of the signed-in form, 18 Oct):
+- **Part 1:** project title*, description* ("What problem does your project solve, and who is it for?"), track*, live
+  demo or deployment, "How did you use FalkorDB in your project?"*, blog link.
+- The Part 1 counter shows 6 required fields but only 4 are visible, so two more required fields, probably the repo
+  and video links, sit between "track" and "Live demo".
+- **Part 2 (Feedback):** what you liked about FalkorDB*, what improvements you would like*. These are the
+  participant's own opinions.
 
-**Project title:** ShutOff: water-main-break isolation on FalkorDB
+**Project title**
+> ShutOff: water-main-break isolation agent on FalkorDB
 
-**One-liner:** An agent that turns a broken-main report into a tested valve-closure plan. FalkorDB derives the
-shutdown area, simulates the closures on a graph copy, shows the evidence path when a plan fails, and re-plans when a
-crew finds a seized valve. It writes a (simulated) work order only after explicit human approval.
+**Description**
+> When a water main breaks, a utility supervisor has minutes to decide which valves to close. The obvious plan,
+> closing the two nearest valves, often fails because water networks are looped. A seized valve silently enlarges the
+> shutdown. And closing a segment can cut off customers outside it, such as a home-dialysis patient at the end of a
+> cul-de-sac.
+>
+> ShutOff is for water-utility supervisors and dispatchers. From a plain-language break report, it finds the broken
+> main and works out the smallest area that valves can isolate. It simulates the closures on a copy of the network
+> graph, then shows who loses water and which priority customers keep a supply path. It rejects a crew's two-valve
+> plan by showing the exact route water would still take to the break, and it re-plans when a crew reports a seized
+> valve. It records a work order only after a human approves that exact plan and acknowledges the critical customers.
+>
+> Limits: the data is fully synthetic, and the model covers connectivity only (no pressure or flow). Work orders and
+> notices are simulated graph records. ShutOff does not control any real infrastructure.
 
-**Track:** Track 1, Agents That Act on Connected Data.
-
-**Why Track 1:** the agent acts on connected data rather than just answering questions about it:
-- It plans an intervention, tests it against the graph, and refuses plans that fail their post-conditions.
-- It records crew observations as graph state (`:Seized`) and re-plans from them.
-- It writes `WorkOrder`/`CLOSES`/`NOTIFIES` records only when a human approves the exact plan revision and impact.
-- Its tools are also served over MCP, and the destructive tools require human confirmation.
-
-**Problem:** when a water main breaks, a supervisor has to decide quickly which valves to close.
-- The obvious "close the two nearest valves" plan often fails, because networks are looped.
-- A valve that has seized silently enlarges the shutdown.
-- Closing a segment can cut off customers *outside* it, such as a home-dialysis patient at the end of a cul-de-sac.
-
-These are connectivity questions on a looped graph.
-
-**Insight:** each of those three risks is a graph operation:
-- the isolation segment is a connected component, with operable valves acting as walls;
-- a seized valve is a label change that merges components;
-- an unintended outage is a component with no source after the closures.
-
-**What FalkorDB contributes:**
-- `algo.WCC` derives the segments.
-- `GRAPH.COPY` provides sandboxes to simulate each plan and each "what if this valve won't close" contingency.
-- `algo.SPpaths` provides the evidence paths: the route water still takes to the break, and each hospital's surviving
-  source path.
-- State labels (`:Open`, `:Seized`) record observations.
-- Graph writes record approved work orders.
-
-Without the graph queries there is no plan, impact, evidence, contingency or restore check. When the optional
-language model is enabled, it only chooses among fixed tools and never writes Cypher.
-
-**Highlights:**
-- The full incident runs in the real UI: break report, then the naive 2-valve plan is rejected with the leak path drawn.
-  A seized valve is reported, the plan is revised to 4 valves, the critical customer is acknowledged, and the work order
-  is approved (simulated).
-- Approval is bound to the plan revision, the predicted impact and the affected-customer set. Questions, what-ifs and
-  negations never write.
-- Segmentation was cross-checked against US EPA WNTR `valve_segments` on the public EPANET networks Net1, Net3 and ky4
-  (964 nodes, 1,158 links). All 12 configurations and all 60 seized-valve trials matched (`docs/BENCHMARK_WNTR.md`).
-- 51 core tests run against a real FalkorDB instance (54 with the optional WNTR benchmark), including a real MCP stdio
-  session.
-- A full plan with 4 contingency simulations takes about 0.5 s locally.
+**Track:** Agents That Act on Connected Data (Track 1) only.
 
 **Repository:** https://github.com/Kartikinfinity/shutoff-graph-agent
 
-**Demo video (3:01):** `demo/shutoff-demo.mp4` in the repository:
-https://github.com/Kartikinfinity/shutoff-graph-agent/blob/main/demo/shutoff-demo.mp4
-(Replace this with a YouTube or Drive link if you upload it there.)
+**Demo video (3:01):** use a YouTube (unlisted) or Drive link. GitHub offers the 44 MB file only as a download:
+https://github.com/Kartikinfinity/shutoff-graph-agent/raw/main/demo/shutoff-demo.mp4
 
-**Deployment:** there is no hosted deployment. It runs locally with one command:
-`git clone …`, then `docker compose up -d`, then open http://localhost:8080. No API key is needed.
+**Live demo or deployment** (optional field). There is no hosted instance, so link the local setup instructions:
+> https://github.com/Kartikinfinity/shutoff-graph-agent#run-it-locally
 
-**Limitations (stated honestly):**
-- Connectivity only: there is no pressure or flow modelling.
-- Synthetic town: segmentation is validated on public EPANET topologies with generated valve locations.
-- Work orders and notices are graph records only; nothing is dispatched or sent.
+**How did you use FalkorDB in your project?**
+> FalkorDB does all of ShutOff's reasoning. The agent only calls a fixed set of tools (also served over MCP) and never
+> writes Cypher.
+> - Isolation area: `algo.WCC` with `nodeLabels` over Junction/Pipe/Seized nodes. Operable valves are left out, so
+>   they act as walls. The valves to close are the ones bordering the break's component.
+> - Safe what-ifs: each plan, and each "what if this valve won't close" case, runs on a `GRAPH.COPY` sandbox. The
+>   closed valves are deleted and WCC is re-run; any component with no Source is dry. What-ifs never touch the live
+>   graph.
+> - Evidence: `algo.SPpaths` returns the route water still takes to the break when a naive plan fails, and each
+>   hospital's remaining supply path.
+> - State and memory: crew reports become labels (`:Seized`, `:Open`), so the same WCC query re-plans. Approved work
+>   orders are written as WorkOrder nodes with CLOSES and NOTIFIES relationships.
+> - Restore safety and valve-exercise ranking: on one copy, toggle `:Open` per valve and re-run WCC (96 scenarios in
+>   about 0.4 s).
+> - Checked: the segments match an independent union-find on the demo network, and US EPA WNTR's `valve_segments` on
+>   the public EPANET networks Net1, Net3 and ky4 (964 nodes, 1,158 links). All 12 configurations and all 60
+>   seized-valve trials were identical. A full plan with 4 what-if simulations takes about 0.5 s locally.
+> - Optional live model mode (Groq `openai/gpt-oss-20b`, live-tested): the model only picks tools. Plan facts come from
+>   the FalkorDB results, and approval stays with the human.
+
+**Blog link:** optional. Leave it blank unless you publish a post.
+
+**Feedback.** These are build facts the participant may draw on, in their own words:
+- *What we liked:*
+  - `algo.WCC` with `nodeLabels` made the isolation area one query, and a seized valve is just a label change.
+  - `GRAPH.COPY` gave cheap sandboxes: about 100 ms per full simulation, including the copy.
+  - `algo.SPpaths` produced readable evidence paths.
+  - One Docker container also includes the Browser UI.
+- *Improvements:*
+  - `GRAPH.COPY` sometimes failed when it ran at the same time as Redis's background save (fork contention), so we
+    added retries.
+  - A what-if overlay that avoids copying the whole graph would scale better to city-sized networks.
+  - More worked examples for the algorithm procedure options would help.
+
+**Limitations to state honestly:**
+- Connectivity only.
+- Synthetic town; segmentation is validated on public EPANET topologies with generated valve locations.
+- Simulated dispatch and notices.
 - One local operator, with no authentication.
-- The deterministic parser covers a limited set of phrasings, and Claude mode has not been tested live.
-- ShutOff does not control any real infrastructure.
+- The deterministic parser covers limited phrasings.
+- Groq mode was live-tested on one scripted incident and is limited by the free tier's rate limits.
+- Claude mode is mock-tested only.
+- There is no hosted deployment.
 
-**AI disclosure:** see `docs/AI_DISCLOSURE.md`. The participant section must be filled in by the participant.
-
-## Remaining actions for the participant
-1. Watch `demo/shutoff-demo.mp4` once, start to finish, with sound. Optionally upload it to YouTube (unlisted) or
-   Drive, if the form wants a video link.
-2. Fill in the "What the participant did" section of `docs/AI_DISCLOSURE.md` honestly, then commit and push it.
-3. Sign in at WeMakeDevs, open the Graph Hacks submission, choose Track 1, and paste the text above plus the repo and
-   video URLs.
-4. Confirm the team members on the submission, and submit before **18 Oct 2026, 11:59 PM IST**.
+**AI disclosure:** `docs/AI_DISCLOSURE.md`. The participant section is the participant's own statement.

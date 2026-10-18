@@ -64,7 +64,7 @@ def health() -> dict:
     except Exception as e:  # report, do not crash the UI
         n, ok = str(e), False
     return {"falkordb": ok, "graph": dbm.GRAPH, "nodes": n,
-            "mode": "llm" if agent.llm_available() else "offline", "model": agent.MODEL if agent.llm_available() else None}
+            "mode": "llm" if agent.llm_available() else "offline", "model": agent.model_name()}
 
 
 @app.get("/api/network")

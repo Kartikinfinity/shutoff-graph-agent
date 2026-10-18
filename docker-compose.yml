@@ -26,6 +26,10 @@ services:
     environment:
       FALKORDB_HOST: falkordb
       FALKORDB_PORT: "6379"
+      # Optional live model: put GROQ_API_KEY=... (or ANTHROPIC_API_KEY=...) in a local .env file
+      # (git-ignored). Unset means the deterministic offline planner.
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     ports:
       - "8080:8000"
     restart: unless-stopped

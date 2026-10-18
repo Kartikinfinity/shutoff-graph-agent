@@ -2,15 +2,18 @@
 
 Two planners share the same tools and the same evidence trace:
 
-* LLM mode (when ANTHROPIC_API_KEY is set): Claude chooses tools and writes
-  a short reply. The reply is checked against what the graph returned; any
+* LLM mode (when ANTHROPIC_API_KEY or GROQ_API_KEY is set): the model chooses
+  tools and writes a short reply. Anthropic (Claude) or Groq (default
+  openai/gpt-oss-20b); SHUTOFF_LLM=anthropic|groq|offline picks one explicitly. The reply is checked against what the graph returned; any
   valve/pipe id or account count the graph did not produce gets the reply
   rejected and replaced by a summary built from the tool results.
 * Offline mode (default, deterministic): a small intent parser maps the
   message to the same tools. Used for the demo and the tests.
 
 Committing a shutdown (closing valves) is never a model decision: it happens
-only when a human approves the current proposal.
+only when a human approves the current proposal. Both providers go through the
+same guard (_model_tool_call): only non-gated tools, and no condition records
+from questions or what-ifs. If the provider fails, the offline planner answers.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ import time
 from dataclasses import dataclass, field
 
 from . import db as dbm
+from . import llm_groq as G
 from . import network as N
 from . import tools as T
 
@@ -63,7 +67,8 @@ class Session:
     last_plan: dict | None = None       # full plan_isolation result behind the proposal
     incident_seq: int = 0
     rev: int = 0
-    messages: list = field(default_factory=list)  # LLM conversation (LLM mode only)
+    messages: list = field(default_factory=list)  # Anthropic conversation (LLM mode only)
+    chat_log: list = field(default_factory=list)  # Groq: earlier user/assistant text only (fits free-tier token limits)
 
 
 SESSIONS: dict[str, Session] = {}
@@ -73,8 +78,25 @@ def session(sid: str) -> Session:
     return SESSIONS.setdefault(sid, Session())
 
 
+def llm_provider() -> str | None:
+    """'anthropic', 'groq' or None (offline). SHUTOFF_LLM forces a choice; otherwise the first key found."""
+    if os.getenv("SHUTOFF_OFFLINE") == "1":
+        return None
+    keys = {"anthropic": bool(os.getenv("ANTHROPIC_API_KEY")), "groq": G.available()}
+    choice = os.getenv("SHUTOFF_LLM", "").strip().lower()
+    if choice in keys:
+        return choice if keys[choice] else None
+    if choice == "offline":
+        return None
+    return next((p for p, ok in keys.items() if ok), None)
+
+
 def llm_available() -> bool:
-    return bool(os.getenv("ANTHROPIC_API_KEY")) and os.getenv("SHUTOFF_OFFLINE") != "1"
+    return llm_provider() is not None
+
+
+def model_name() -> str | None:
+    return {"anthropic": MODEL, "groq": G.MODEL}.get(llm_provider())
 
 
 # ------------------------------------------------------------------ running
@@ -135,10 +157,11 @@ def handle(sid: str, text: str) -> dict:
         try:
             reply, verified, note = _llm_turn(s, text, steps)
             mode = "llm"
-        except Exception as e:  # network/API failure: fall back, and say so
+        except Exception as e:  # network/API/rate-limit failure: fall back, and say so
             steps.clear()
             reply = _offline_turn(s, text, steps)
-            mode, verified, note = "offline", True, f"LLM unavailable ({type(e).__name__}); used offline planner."
+            why = str(e) if isinstance(e, G.LLMUnavailable) else type(e).__name__
+            mode, verified, note = "offline", True, f"LLM unavailable ({why}); used offline planner."
     else:
         reply = _offline_turn(s, text, steps)
         mode, verified, note = "offline", True, None
@@ -522,12 +545,14 @@ def _result_numbers(x, acc: set[str]) -> None:
         acc.add(str(len(x)))
 
 
-def check_reply(reply: str, steps: list[Step]) -> tuple[bool, str | None]:
-    """Reject replies that mention ids or account counts the graph never returned."""
-    evidence = json.dumps([st.result for st in steps], default=str)
+def check_reply(reply: str, steps: list[Step], earlier: list[dict] | None = None) -> tuple[bool, str | None]:
+    """Reject replies that mention ids or account counts the graph never returned
+    (in this turn's tool results, or in `earlier` results such as the plan on screen)."""
+    results = [st.result for st in steps] + list(earlier or [])
+    evidence = json.dumps(results, default=str)
     numbers: set[str] = set(COUNT_RE.findall(evidence))  # e.g. '(20 homes)' inside customer names
-    for st in steps:
-        _result_numbers(st.result, numbers)
+    for r in results:
+        _result_numbers(r, numbers)
     bad_ids = [i for i in ID_RE.findall(reply) if i not in evidence]
     bad_counts = [n for n in COUNT_RE.findall(reply) if n not in numbers]
     if bad_ids or bad_counts:
@@ -535,7 +560,94 @@ def check_reply(reply: str, steps: list[Step]) -> tuple[bool, str | None]:
     return True, None
 
 
+MODEL_TOOL_NAMES = frozenset(t["name"] for t in T.model_tools())
+
+
+def _model_tool_call(s: Session, name: str, args: dict, user_text: str, steps: list[Step]) -> tuple[dict, bool]:
+    """Run one tool a model asked for, under the same rules for every provider.
+    Returns (result, is_error). Refused calls touch nothing and are not graph evidence."""
+    if name not in MODEL_TOOL_NAMES:
+        return {"outcome": "refused", "reason": (f"{name} is not available to the assistant. Shutdowns and restores "
+                                                 "happen only when the supervisor presses Approve or Restore.")}, True
+    if name == "report_valve_condition" and not is_observation(user_text):
+        return {"outcome": "refused", "reason": ("Not recorded: the user's message is a question or a what-if, "
+                                                 "not a crew observation. Use valve_status or the plan's contingencies.")}, True
+    if name == "report_valve_condition":
+        # Record only what the message itself reports about that valve (live test, 18 Oct:
+        # gpt-oss-20b turned "issue the work order, close the valves" into two 'ok' reports).
+        words = SEIZED_WORDS if args.get("condition") == "seized" else OK_WORDS
+        if str(args.get("valve_id", "")).upper() not in _valves_described(user_text, words):
+            return {"outcome": "refused", "reason": ("Not recorded: the message does not report that condition for "
+                                                     "that valve. Only crew observations naming the valve are recorded.")}, True
+    r = _run_tool(s, name, args, steps)
+    return r, r.get("outcome") in ("invalid_arguments", "error")
+
+
+ID_DASH_RE = re.compile(r"\b(V|P|WO|INC)[‐-―−﹣－](?=\d)")
+
+
+# Tools whose results are the plan itself. In the live test (18 Oct) gpt-oss-20b restated a
+# 4-valve, 34-account plan as "close V-212 and V-213 (32 accounts)": every id and number
+# existed somewhere in the results, so the id/count check passed. For these tools the reply
+# is therefore built from the results; the model's own wording is kept for read-only answers.
+DECISION_TOOLS = frozenset({"locate_break", "plan_isolation", "check_closure_plan", "report_valve_condition"})
+
+
+def _checked(s: Session, reply: str, steps: list[Step], user_text: str) -> tuple[str, bool, str | None]:
+    # Models often write ids with a non-breaking hyphen (U+2011); normalise them first
+    # so the id check below cannot be sidestepped by typography.
+    reply = ID_DASH_RE.sub(r"\1-", reply)
+    ok, why = check_reply(reply, steps, [s.last_plan] if s.last_plan else [])
+    if not steps and (not ok or not reply):
+        # The model answered from memory and could not be verified: the offline planner answers.
+        return _offline_turn(s, user_text, steps), False, f"{why or 'model returned no text'}; answered by the offline planner"
+    planned = any(st.tool == "plan_isolation" for st in steps)
+    grounded = " ".join(summarize(st.tool, st.result) for st in steps
+                        if not (planned and st.tool == "locate_break"))  # the plan summary repeats the location
+    if not ok or not reply:
+        return grounded or "No answer from the model.", False, why or "model returned no text; reply built from tool results"
+    if any(st.tool in DECISION_TOOLS for st in steps):
+        return grounded, True, "the model chose the tools; plan facts are stated from the graph results"
+    return reply, True, None
+
+
 def _llm_turn(s: Session, text: str, steps: list[Step]) -> tuple[str, bool, str | None]:
+    return _groq_turn(s, text, steps) if llm_provider() == "groq" else _anthropic_turn(s, text, steps)
+
+
+def _groq_turn(s: Session, text: str, steps: list[Step]) -> tuple[str, bool, str | None]:
+    user_text = text
+    if s.active_pipe:
+        text = f"{text}\n\n[context: active break pipe {s.active_pipe}]"
+    s.report = s.report or text
+    msgs = [{"role": "system", "content": SYSTEM_PROMPT}, *s.chat_log[-4:], {"role": "user", "content": text}]
+    tools = G.tool_defs(T.model_tools())
+    reply = ""
+    for _ in range(6):
+        m = G.chat(msgs, tools)
+        calls = m.get("tool_calls") or []
+        if not calls:
+            reply = (m.get("content") or "").strip()
+            break
+        msgs.append({"role": "assistant", "content": m.get("content"), "tool_calls": calls})
+        for c in calls:
+            fn = c.get("function") or {}
+            name = fn.get("name") or ""
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+            except ValueError:
+                args = None
+            if isinstance(args, dict):
+                r, _ = _model_tool_call(s, name, args, user_text, steps)
+            else:
+                r = {"outcome": "invalid_arguments", "reason": "Tool arguments must be a JSON object."}
+            msgs.append({"role": "tool", "tool_call_id": c.get("id"), "name": name, "content": _compact(r)})
+    out = _checked(s, reply, steps, user_text)
+    s.chat_log += [{"role": "user", "content": user_text}, {"role": "assistant", "content": out[0]}]
+    return out
+
+
+def _anthropic_turn(s: Session, text: str, steps: list[Step]) -> tuple[str, bool, str | None]:
     import anthropic
 
     client = anthropic.Anthropic()
@@ -566,17 +678,7 @@ def _llm_turn(s: Session, text: str, steps: list[Step]) -> tuple[str, bool, str 
             break
         results = []
         for b in uses:
-            if b.name == "report_valve_condition" and not is_observation(user_text):
-                r = {"outcome": "refused", "reason": ("Not recorded: the user's message is a question or a what-if, "
-                                                      "not a crew observation. Use valve_status or the plan's contingencies.")}
-                results.append({"type": "tool_result", "tool_use_id": b.id, "content": json.dumps(r), "is_error": True})
-                continue
-            r = _run_tool(s, b.name, dict(b.input), steps)
-            results.append({"type": "tool_result", "tool_use_id": b.id, "content": _compact(r),
-                            "is_error": r.get("outcome") in ("invalid_arguments", "error")})
+            r, is_error = _model_tool_call(s, b.name, dict(b.input), user_text, steps)
+            results.append({"type": "tool_result", "tool_use_id": b.id, "content": _compact(r), "is_error": is_error})
         s.messages.append({"role": "user", "content": results})
-    ok, why = check_reply(reply, steps)
-    if not ok or not reply:
-        fallback = " ".join(summarize(st.tool, st.result) for st in steps) or "No answer from the model."
-        return fallback, False, why or "model returned no text; reply built from tool results"
-    return reply, True, None
+    return _checked(s, reply, steps, user_text)

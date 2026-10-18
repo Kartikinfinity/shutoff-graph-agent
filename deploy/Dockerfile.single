@@ -1,0 +1,16 @@
+# One-container image for free hosts that run a single container (e.g. a Hugging Face Docker Space).
+# FalkorDB runs inside the container on 127.0.0.1; only the web app's port is reachable.
+# Build: docker build -f deploy/Dockerfile.single -t shutoff-single .
+# Run:   docker run --rm -p 7860:7860 shutoff-single   ->  http://localhost:7860
+FROM falkordb/falkordb@sha256:b0bdcac2cbaff989e77cb0610439b7a9289e86de033ccbbd4368b66fb680ae7a
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv \
+    && rm -rf /var/lib/apt/lists/* && python3 -m venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH PYTHONUNBUFFERED=1 FALKORDB_HOST=127.0.0.1 FALKORDB_PORT=6379 PORT=7860
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY shutoff ./shutoff
+COPY web ./web
+COPY deploy/start-single.sh ./start.sh
+EXPOSE 7860
+ENTRYPOINT ["/bin/sh", "/app/start.sh"]

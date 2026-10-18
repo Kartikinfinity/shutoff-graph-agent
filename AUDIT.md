@@ -44,7 +44,7 @@ Priority key: P0 = submission blocker or safety bug, P1 = materially wrong or mi
 | R11 | Participant can explain; meaningful contribution (Rules 12–13) | UNVERIFIED (risk) | Code was written by the AI assistant; the participant chose the idea | Possible rejection under Rule 13 | Read `docs/EXPLAINER.md`, run the demo, record the narration in your own voice, make and own at least some changes (**P0, user**) |
 | R12 | Track 1: multi-hop reasoning | PASS | 20-hop leak path, 14-hop supply proof, segment merging through seized valves | — | — |
 | R13 | Track 1: graph algorithms as tools | PASS | `algo.WCC` in 6 queries, `algo.SPpaths` in proof paths, `GRAPH.COPY` sandboxes | — | — |
-| R14 | Track 1: tool selection through MCP | PARTIAL | MCP server verified over a **real stdio client** (9 tools; `locate_break` and `check_closure_plan` returned correct results). The web agent calls `tools.py` directly, and LLM tool selection is untested live | Judges may want to see MCP in use | Show MCP in the demo or README; live LLM test needs a key (P2) |
+| R14 | Track 1: tool selection through MCP | MET (18 Oct, evening) | MCP server verified over a **real stdio client** (9 tools; `locate_break` and `check_closure_plan` returned correct results). The web agent calls `tools.py` directly; LLM tool selection was live-tested with Groq `openai/gpt-oss-20b` on one scripted incident (`docs/LIVE_LLM_TEST.md`), and the failures it exposed were fixed | Judges may want to see MCP in use | Claude mode still mock-tested only |
 | R15 | Track 1: actions based on the graph | PARTIAL → fixed in §4 | Work orders and seized-valve reports write to the live graph; safety bugs T6–T9 | Actions are the track's point | See T6–T9 |
 | R16 | Track 1: explainable results | PASS | Evidence panel lists every tool call's Cypher, params, rows and latency; paths drawn on the map | — | — |
 
@@ -162,5 +162,5 @@ Wording and claims were corrected in the UI, the replies and the docs: simulated
 pressure"; "valves to close" with no implied sequence; the Blast Radius comparison; observations persist. The UI was
 redesigned and the WNTR cross-check added. Full details are in [RESEARCH_AND_REDESIGN.md](RESEARCH_AND_REDESIGN.md).
 
-**Test evidence (18 Oct):** 51 core tests + 3 WNTR benchmark tests pass against FalkorDB, with 0 skipped in this
+**Test evidence (18 Oct):** 56 core tests + 3 WNTR benchmark tests pass against FalkorDB, with 0 skipped in this
 environment (WNTR installed).

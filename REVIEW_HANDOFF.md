@@ -14,7 +14,7 @@ State of this baseline: 40/40 tests pass, the app starts, and the live Claude AP
 > - The UI was redesigned around the operator workflow.
 > - ShutOff's segment query was cross-checked against WNTR on public EPANET networks ([docs/BENCHMARK_WNTR.md](docs/BENCHMARK_WNTR.md)).
 >
-> Tests: 51 core + 3 optional benchmark tests. File list additions: `benchmarks/`, `tests/test_benchmark.py`,
+> Tests: 56 core + 3 optional benchmark tests. File list additions: `benchmarks/`, `tests/test_benchmark.py`,
 > `requirements-benchmark.txt`, `RESEARCH_AND_REDESIGN.md`.
 
 ---
@@ -143,6 +143,7 @@ Every product query is one of 39 named constants in [`shutoff/queries.py`](shuto
 | MCP server | **Verified** | in-process (`test_mcp_server_*`); also smoke-tested once over a real stdio client during the audit (9 tools, correct results). The stdio check is not part of the test suite |
 | Clean install from scratch | **Verified once** | During the audit (17 Oct): new venv + `requirements.txt` + new container from the pinned digest, then seed, 26/26 tests (pre-fix suite), API answered. Not repeated for the 40-test suite |
 | Claude tool loop | **Mocked only** | `test_llm_loop_*` use a fake client. The real request shape (`client.beta.messages.create` with `betas=["server-side-fallback-2026-07-01"]`, `fallbacks="default"`, `output_config={"effort": "medium"}`) has **never been sent to the live API** |
+| Groq tool loop (`openai/gpt-oss-20b`) | **Live-tested** (18 Oct, evening) | One scripted incident, 6 turns, all handled by the live model after fixes; see `docs/LIVE_LLM_TEST.md`. Mocked regression tests cover the failure modes it exposed |
 | Crew dispatch, customer notices | **Simulated** | Recorded as `NOTIFIES {channel:'simulated'}` edges; nothing is sent. Labelled in UI, API and docs |
 | Hydraulics (pressure, flow) | **Not modelled** | Connectivity only |
 | UI rendering | **Manually checked** | Screenshots in `docs/screenshots/`; no automated UI tests |

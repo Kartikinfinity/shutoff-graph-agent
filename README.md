@@ -8,7 +8,7 @@ plans, exposes the connectivity evidence behind them, and updates the graph stat
 human actions. ShutOff predicts critical-customer outages. Physical valve operation, hydraulic adequacy
 (pressure and flow) and external dispatch are outside this prototype.
 
-**Demo video (3:01, narrated, with captions):** [demo/shutoff-demo.mp4](demo/shutoff-demo.mp4) · captions [demo/shutoff-demo.srt](demo/shutoff-demo.srt)
+**Demo video (3:01, narrated, with captions):** [demo/shutoff-demo.mp4](demo/shutoff-demo.mp4) (44 MB; GitHub offers it as a download, not a preview) · captions [demo/shutoff-demo.srt](demo/shutoff-demo.srt)
 
 **Quick start:** `docker compose up -d`, then open http://localhost:8080 (details in [Run it locally](#run-it-locally)).
 
@@ -45,7 +45,7 @@ water-distribution literature (e.g. [Jun et al. 2008](https://link.springer.com/
    Recording marks valves closed in the graph. **No crew is dispatched and no message is sent.**
 8. **Restores safely.** Each valve is re-opened on a copy first. A valve that another active break still needs stays closed.
 
-## Why FalkorDB is indispensable here
+## What FalkorDB does in ShutOff
 
 | Decision | Graph operation (in FalkorDB) |
 |---|---|
@@ -58,8 +58,8 @@ water-distribution literature (e.g. [Jun et al. 2008](https://link.springer.com/
 | Is restoring safe? | On a copy: set the valve `:Open`, re-run WCC, check other active breaks stay dry |
 | Which valves to exercise first | One copy; toggle `:Open` per valve; WCC (96 scenarios in ~0.4 s) |
 
-Without FalkorDB there is no plan, no impact, no evidence path, no contingency and no restore check.
-The language model (when enabled) only chooses among fixed tools. Connectivity always comes from graph queries.
+Every plan, impact, evidence path, contingency and restore check is a FalkorDB query. When a language model is
+enabled, it only chooses among the fixed tools; connectivity always comes from the graph.
 
 ### Correctness evidence
 
@@ -175,8 +175,8 @@ ORDER BY hops LIMIT 1
 ```
  Browser UI (web/)  ──HTTP──►  FastAPI (shutoff/api.py)
                                     │
-                         agent.py ──┤  deterministic planner (default; the verified mode)
-                                    │  or Claude tool loop (only with ANTHROPIC_API_KEY; not live-tested)
+                         agent.py ──┤  deterministic planner (default)
+                                    │  or LLM tool loop: Groq gpt-oss-20b (live-tested) or Claude (mock-tested only)
  MCP clients ──stdio/HTTP──► mcp_server.py
                                     │
                               tools.py   fixed catalogue, argument validation, human-gated actions
@@ -192,10 +192,11 @@ ORDER BY hops LIMIT 1
 - **Observations versus questions.** A valve condition is recorded only from a statement ("Crew reports V-265 is seized"):
   - "Is V-265 seized?" uses the read-only `valve_status` tool;
   - "What if V-265 won't turn?" is answered from the plan's contingency simulation.
-  - This is enforced for the deterministic parser and, server-side, for the model.
+  - This is enforced for the deterministic parser and, server-side, for the model. The model can record a condition
+    only for a valve the message names with that condition.
 
 **Approving and restoring**
-- **Human-only actions.** `issue_work_order` and `restore_service` are never offered to the model.
+- **Human-only actions.** `issue_work_order` and `restore_service` are never offered to the model, and a model call to any tool it was not offered is refused.
   - In the UI: the Approve and Restore buttons, or exact typed commands ("approve", "restore WO-1001"). "Do not restore WO-1001" changes nothing.
   - Over MCP: they are marked destructive and require `confirmed_by_human` plus the impact the human was shown. *Trust boundary:* that confirmation is asserted by the MCP client; ShutOff does not authenticate people.
 - **Bound approvals.** Each plan has a revision ID (e.g. `IR1-r2`). Approval must name the revision on screen and is re-simulated:
@@ -206,7 +207,7 @@ ORDER BY hops LIMIT 1
 
 **Honest wording**
 - Simulated effects say "would". Paths are "source paths" (connectivity, not pressure). Valves are listed by ID, with no operating sequence implied.
-- In model mode, the reply check verifies only that the **IDs and counts** it mentions came from tool results. Consequence statements in the UI come from deterministic summaries.
+- In model mode, plan facts (valves, accounts, paths, recorded observations) are stated from the graph results, not from the model's wording. In the live test the model misstated a plan using ids and numbers that did exist in the results, which an id/count check cannot catch. The model's own wording is used only for read-only answers, and every ID and count in it must come from tool results or the plan on screen.
 
 ## Run it locally
 
@@ -218,6 +219,7 @@ which seeds the synthetic network on first start:
 docker compose up -d
 ```
 Then open http://localhost:8080. Verified on 18 Oct 2026: the containerised app answered `/api/health` and returned the 4-valve plan.
+To use the optional live model there, put `GROQ_API_KEY=...` in a local `.env` file (git-ignored) before starting.
 
 **For development and tests** (Python 3.12, tested with 3.12.0). Start FalkorDB only:
 ```bash
@@ -244,7 +246,10 @@ Run the app, then open http://localhost:8000:
 ```
 On macOS or Linux, use `.venv/bin/python` instead of `.venv/Scripts/python`.
 
-- **Mode:** without `ANTHROPIC_API_KEY`, the deterministic planner is used and labelled in the header. With a key, Claude (`claude-opus-5-5`, override with `SHUTOFF_MODEL`) picks the tools. *That mode has not been tested against the live API.*
+- **Mode:** with no model key, the deterministic planner is used and labelled in the header. Optional live model:
+  - `GROQ_API_KEY` (free tier): Groq `openai/gpt-oss-20b` picks the tools (override with `SHUTOFF_GROQ_MODEL`). Live-tested on 18 Oct on one scripted incident; see [docs/LIVE_LLM_TEST.md](docs/LIVE_LLM_TEST.md). On a rate limit or API error the offline planner answers, and the reply says so.
+  - `ANTHROPIC_API_KEY`: Claude (`claude-opus-5-5`, override with `SHUTOFF_MODEL`). Tested only with a mocked client.
+  - `SHUTOFF_LLM=groq|anthropic|offline` forces a choice when both keys are set.
 - **Explore the graph:** FalkorDB Browser at http://localhost:3000, graph `riverbend`.
 - **MCP:** `python -m shutoff.mcp_server` (stdio) or `--http 8765`. Example client config: `{"mcpServers": {"shutoff": {"command": "<repo>/.venv/Scripts/python", "args": ["-m", "shutoff.mcp_server"], "cwd": "<repo>"}}}`.
 
@@ -259,7 +264,7 @@ Optional: add the WNTR cross-check tests (3 more):
 .venv/Scripts/python -m pip install -r requirements-benchmark.txt
 ```
 
-The core suite has 51 tests. Integration tests are skipped when FalkorDB is unreachable, so check that nothing is skipped except the optional benchmark module (which needs WNTR). They cover:
+The core suite has 56 tests. Integration tests are skipped when FalkorDB is unreachable, so check that nothing is skipped except the optional benchmark module (which needs WNTR). They cover:
 - the union-find cross-check;
 - the Plan A / Plan B / crew-plan numbers, and leak paths made of real pipe links;
 - copies never changing the live graph;
@@ -267,7 +272,7 @@ The core suite has 51 tests. Integration tests are skipped when FalkorDB is unre
 - impact attribution;
 - `GRAPH.COPY` under background-save fork contention;
 - the HTTP API and the MCP gating, including a real MCP stdio session (the server runs as a subprocess and a client calls its tools);
-- the model loop with a **mocked** client.
+- the model loops with a **mocked** client or transport, including the failure modes seen in the live Groq test (a wrong restatement of the plan, a call to a human-gated tool, an invented observation, an id written with a non-breaking hyphen, a rate limit).
 
 ## Demo video (3:01)
 
@@ -285,7 +290,7 @@ The core suite has 51 tests. Integration tests are skipped when FalkorDB is unre
 - every caption appears 0.01–0.06 s before its line is spoken;
 - a local speech recognizer (faster-whisper `base.en`) hears 88% of the script's words in order, and the misses are number formatting or homophones.
 
-A person has not listened to it on this machine; watch it once before submitting. Tools for regenerating it: `requirements-demo.txt`.
+These checks are automated. Tools for regenerating the video: `requirements-demo.txt`.
 
 To rehearse the same story yourself (click *Reset demo* first):
 
@@ -307,12 +312,12 @@ To rehearse the same story yourself (click *Reset demo* first):
 
 ## Limitations
 
-- **No live deployment.** Hosting needs accounts and credentials that the authors must set up; the one-command Docker route above is the supported way to run it.
+- **No live deployment.** Hosting needs an account that the authors must set up, and FalkorDB Cloud's free plan has no TLS. [deploy/README.md](deploy/README.md) has a locally tested one-container image (FalkorDB private inside it) for a free Hugging Face Space. The supported route is `docker compose up -d`.
 - **Connectivity, not hydraulics.** No pressure, flow, pressure zones, check valves or PRVs. Pair it with EPANET for real use.
 - **Synthetic demo network.** Segmentation is validated on public EPANET topologies (with generated valve locations); the full workflow runs only on Riverbend.
 - **Simulated outside world.** Work orders and notices are graph records only.
 - **One local operator.** There are no authenticated users, no atomic multi-step writes and no concurrency control. Sessions are in memory.
-- **Limited language.** The deterministic parser understands a limited set of phrasings. Claude mode is untested live.
+- **Limited language.** The deterministic parser understands a limited set of phrasings. The Groq model mode was live-tested on one scripted incident only. Its free tier allows about 8K tokens a minute (one to two turns), and beyond that the offline planner answers. Claude mode is untested live.
 - The valve-exercise ranking is a transparent heuristic, not a calibrated risk model. A seized valve is treated as pass-through even when closed, which is conservative.
 
 ## Originality, data and AI disclosure
@@ -325,4 +330,4 @@ To rehearse the same story yourself (click *Reset demo* first):
   - records state changes only after approval;
   - re-plans when a crew's observation contradicts the plan.
 - Synthetic data only (`shutoff/town.py`). The benchmark uses public-domain EPANET example networks shipped with WNTR.
-- **AI assistance:** built with an AI coding assistant (Claude Code, model Claude Opus 5.5) under the participant's direction. See [docs/AI_DISCLOSURE.md](docs/AI_DISCLOSURE.md). Research and design decisions are in [RESEARCH_AND_REDESIGN.md](RESEARCH_AND_REDESIGN.md); audits are in [AUDIT.md](AUDIT.md).
+- **AI assistance:** most of the code, tests, documentation and the demo video were produced by Claude Code (model Claude Opus 5.5) under the participant's direction. See [docs/AI_DISCLOSURE.md](docs/AI_DISCLOSURE.md). Research and design decisions are in [RESEARCH_AND_REDESIGN.md](RESEARCH_AND_REDESIGN.md); audits are in [AUDIT.md](AUDIT.md).
