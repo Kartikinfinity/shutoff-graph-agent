@@ -308,7 +308,7 @@ function renderMap() {
     if (n.id.endsWith("0")) el("text", { x: n.x + 85, y: n.y - 10, class: "street", "text-anchor": "middle" }, gStreets).textContent = street.toUpperCase();
     if (n.id[2] === "0") el("text", { x: n.x, y: n.y - 32, class: "street", "text-anchor": "middle" }, gStreets).textContent = ave.toUpperCase();
   }
-  if (by["J-WE"]) el("text", { x: by["J-WE"].x + 12, y: by["J-WE"].y + 5, class: "street" }, gStreets).textContent = "WILLOW CT";
+  if (by["J-WE"]) el("text", { x: by["J-WE"].x, y: by["J-WE"].y + 24, class: "street", "text-anchor": "middle" }, gStreets).textContent = "WILLOW CT";
 
   for (const e of net.edges) {
     const a = by[e.a], b = by[e.b];
@@ -543,7 +543,7 @@ function planHtml() {
     }).join("") + `</ul></div>`;
 
   // valves
-  h += `<div class="sec"><h3>Valves to close <span class="muted">${p.close.length}</span></h3><ul class="rows">` +
+  h += `<div class="sec"><h3>${issued && S.issued ? `Valves closed by ${esc(S.issued.work_order)}` : "Valves to close"} <span class="muted">${p.close.length}</span></h3><ul class="rows">` +
     p.close.map((v) => `<li><button type="button" class="row ${S.focus === v.id ? "selected" : ""}" data-valve="${esc(v.id)}"><span class="id">${esc(v.id)}</span><span class="grow">${esc(v.location)}</span>${v.condition !== "ok" ? `<span class="badge warn">${esc(v.condition)} · ${esc(v.last_exercised)}</span>` : ""}${S.ov.changed.has(v.id) ? `<span class="badge hyp">new</span>` : ""}</button></li>`).join("") +
     `</ul><p class="note">Listed by ID. ShutOff derives which valves bound the area; it does not plan an operating sequence.</p></div>`;
 

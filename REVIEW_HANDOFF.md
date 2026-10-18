@@ -4,6 +4,19 @@ Baseline under review: git commit **`54e5e78`** on branch `master` (17 Oct 2026,
 Pre-audit baseline: `832a626`. Event: Graph Hacks (WeMakeDevs × FalkorDB), Track 1 "Agents That Act on Connected Data".
 State of this baseline: 40/40 tests pass, the app starts, and the live Claude API mode is **not** tested (see §4).
 
+> **Update, 18 Oct 2026.** This handoff describes `54e5e78`. Since then an independent review was addressed (see
+> [RESEARCH_AND_REDESIGN.md](RESEARCH_AND_REDESIGN.md) §6):
+> - Questions, what-ifs and negations no longer trigger writes.
+> - Plans carry revision IDs; approval is bound to the revision on screen and to the exact affected customers.
+> - A failed report clears the old plan.
+> - MCP restore and issue need confirmation plus the shown impact.
+> - New read-only `valve_status` tool and `/api/replan` endpoint.
+> - The UI was redesigned around the operator workflow.
+> - ShutOff's segment query was cross-checked against WNTR on public EPANET networks ([docs/BENCHMARK_WNTR.md](docs/BENCHMARK_WNTR.md)).
+>
+> Tests: 49 core + 3 optional benchmark tests. File list additions: `benchmarks/`, `tests/test_benchmark.py`,
+> `requirements-benchmark.txt`, `RESEARCH_AND_REDESIGN.md`.
+
 ---
 
 ## 1. What it is, for whom, and the problem

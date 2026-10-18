@@ -7,6 +7,7 @@
 - Wrote the code in this repository: the synthetic network generator, FalkorDB loader, Cypher queries, planning and simulation logic, tool catalogue, agent loop, MCP server, web UI and tests.
 - Drafted the README and docs, and scripted the screenshot and demo-video capture.
 - Ran a forensic audit of its own implementation (`AUDIT.md`), found safety and correctness bugs, and fixed them with regression tests.
+- On 18 Oct, took an independent review (GPT, supplied by the participant) and its own targeted research, fixed the confirmed findings, redesigned the UI, and added the WNTR benchmark (`RESEARCH_AND_REDESIGN.md`).
 
 **What the participant did:**
 - Chose and approved the project direction (ShutOff, Track 1) from the proposed options.

@@ -40,7 +40,8 @@ All the data is invented (synthetic). There's no real town or real people.
 
 Before trusting a plan, ShutOff copies the whole network graph (`GRAPH.COPY`, about a tenth of a
 second here). It closes the valves *in the copy* by deleting them, runs WCC and SPpaths there, then
-deletes the copy. The real network graph is never touched while planning. (Copying briefly forks the
+deletes the copy. The real network graph is never touched while planning; only crew observations, approved
+work orders and restores change it. (Copying briefly forks the
 database process; if the database is saving to disk at that exact moment, ShutOff waits and retries.)
 
 ## The important queries, one line each
@@ -60,26 +61,35 @@ database process; if the database is saving to disk at that exact moment, ShutOf
 
 ## Impact validation and approval safeguards
 
-1. **The AI can't close valves.** The language model, when used, is only given read and report tools. Closing valves needs a human click (or a typed "approve").
-2. **The server re-checks on approval.** It runs the simulation again and refuses if:
+1. **The AI can't close valves.** The language model, when used, only gets read tools and "save a crew observation". Closing or re-opening valves needs a human click, or an exact typed command ("approve", "restore WO-1001"). "Do not restore WO-1001" or "How do I restore…" changes nothing.
+2. **Questions never write.** "Is V-265 seized?" reads the valve's recorded condition. "What if V-265 won't turn?" answers from the plan's pre-computed contingency. Only a statement such as "Crew reports V-265 is seized" saves anything.
+3. **Approval is tied to the plan on screen.** Every plan has a revision ID (`IR1-r1`, `IR1-r2`, …). A new report, even a failed one, clears the old plan. Approving an old revision is refused.
+4. **The server re-checks on approval.** It runs the simulation again and refuses if:
    - the break would still get water,
    - a valve in the plan is recorded as seized,
-   - the impact (accounts out, critical customers) differs from what was on screen when you approved (the network changed in between).
-3. **Critical customers need an explicit tick.** If the plan cuts off the dialysis account, you must tick a box naming it. The server checks the exact customer ID, not just the click.
-4. **Fair numbers.** Customers already without water because of *another* work order aren't counted against a new plan; they're shown separately.
-5. **Safe restore.** When a repair is done, each valve is re-opened in a copy first. If that would send water back into another break that is still being repaired, the valve stays closed.
+   - the impact (accounts out, critical customers, *which* customers) differs from what was on screen when you approved (the network changed in between).
+5. **Critical customers need an explicit tick.** If the plan cuts off the dialysis account, you must tick a box naming it. The server checks the exact customer ID, not just the click.
+6. **Fair numbers.** Customers already without water because of *another* work order aren't counted against a new plan; they're shown separately.
+7. **Safe restore.** When a repair is done, each valve is re-opened in a copy first. If that would send water back into another break that is still being repaired, the valve stays closed.
 6. **No guessing.** An unknown street gets "not in the graph"; an unclear location gets a list of candidate pipes. A crew message only marks a valve seized if it actually says that valve is stuck.
 
 Be precise about the dialysis account: ShutOff can't keep it supplied once V-265 fails, because
 there is no other pipe to Willow Ct. What it does is *predict* the risk before the valve fails, flag
 it, force an explicit acknowledgement, and record a priority notice (simulated).
 
-## What the tests actually prove (40 tests, all passing)
+## What the tests actually prove (49 core tests + 3 optional benchmark tests, all passing)
 
-- **The algorithm is right.** For every one of the 53 pipes, FalkorDB's WCC answer matches an independent Python calculation.
+- **The algorithm is right.** For every one of the 53 pipes, FalkorDB's WCC answer matches an independent Python calculation. On three public EPANET networks (up to 964 nodes), ShutOff's segment query gives exactly the same segments as the US EPA's WNTR toolkit, including with seized valves (`docs/BENCHMARK_WNTR.md`).
 - **The demo numbers are real.** Plan A is 4 valves and 34 accounts. Plan B is 7 valves, 66 accounts, with the dialysis account cut off. The crew's 2-valve plan fails, and every step of the leak path is a real pipe connection.
 - **Planning never changes the real network.** No copies are left behind, and read-only queries can't write.
-- **The safeguards work.** Seized valves, leaking plans, changed impact, missing or wrong acknowledgement, missing human confirmation and duplicate valves are all refused. Restore never re-feeds another active break and can't run twice.
+- **The safeguards work.** All of these are refused:
+  - seized valves and leaking plans;
+  - changed impact, and an out-of-date plan revision;
+  - a plan left over from a failed report;
+  - a missing or wrong acknowledgement, or missing human confirmation;
+  - duplicate valves.
+
+  Questions, what-ifs and negated commands cause no writes. Restore never re-feeds another active break and can't run twice.
 - **Inputs aren't guessed.** Unknown and ambiguous locations are handled honestly.
 - **The interfaces work.** The offline agent, the web API and the MCP server work end to end. Copying survives clashes with the database's background saves.
 
@@ -87,10 +97,11 @@ What the tests do **not** prove:
 - Live Claude mode. It's tested only with a fake client, and has never been run against the real API.
 - Behaviour on a real utility network.
 - Water pressure.
-- How the UI looks; that was only checked by screenshots.
+- How the UI looks; that was checked by driving it with Playwright in both themes and at three screen sizes, then reviewing the screenshots.
+- That the deterministic parser understands every phrasing; it handles a limited set.
 
 ## Three answers to have ready
 
 - **"Why a graph?"** Every decision here is "what is still connected to what". The graph database answers that directly, and every answer comes with a path as evidence.
-- **"How is this different from the official Blast Radius example?"** Blast Radius reads a dependency graph and reports. ShutOff decides an action, tests it on a copy, checks safety conditions, changes the graph only after approval, and re-plans when a crew reports a stuck valve.
+- **"How is this different from the official Blast Radius example?"** Blast Radius traverses a dependency graph to answer impact questions and saves findings as memory. ShutOff decides an action, tests it on a copy, checks post-conditions, changes the graph only after approval, and re-plans when a crew reports a stuck valve.
 - **"What's simulated?"** The town, the crew dispatch and the customer notices. The graph calculations are real.

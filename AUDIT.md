@@ -141,3 +141,26 @@ query, and the WCC result is independently cross-checked in tests.
 **Not changed on purpose:** the UI design, the network data, the LLM prompt, and the scope (no new features).
 
 **Still unverified:** the Claude API mode against the live API (no credentials on this machine).
+
+
+## 5. Independent review follow-up (18 Oct 2026)
+
+An independent review of `54e5e78` (GPT; `output/`, not committed) reproduced new defects with mocked calls. I
+re-ran each probe against FalkorDB before fixing:
+
+| Probe | Before | After (test) |
+|---|---|---|
+| "What if V-265 won't turn?" / "Is V-265 seized?" | Recorded V-265 as seized and re-planned | No write; answered from the contingency or `valve_status` (`test_questions_and_hypotheticals_never_record_a_valve_condition`) |
+| "Do not restore WO-1001." | **Restored the work order** | No change; restore needs the button or an exact "restore WO-1001" (`test_negated_or_question_restore_text_does_not_restore`) |
+| Valid plan → unknown Elm St report → "approve" | Issued the old P-107 plan | Plan cleared; nothing to approve (`test_failed_new_report_drops_the_previous_plan`) |
+| Approving an older plan revision | Not checked | Refused (`test_approval_is_bound_to_the_plan_revision_on_screen`, HTTP test) |
+| Same totals, different customers | Not checked | Refused (`test_approval_is_bound_to_the_exact_affected_customers`) |
+| MCP restore without confirmation; issue without the shown impact | Allowed | Refused (`test_mcp_server_exposes_the_same_tools_and_gates_destructive_ones`, unit tests) |
+| LLM records a condition from a question | Possible | Blocked server-side (`test_llm_mode_cannot_record_a_condition_from_a_question`) |
+
+Wording and claims were corrected in the UI, the replies and the docs: simulated effects say "would"; "source path, not
+pressure"; "valves to close" with no implied sequence; the Blast Radius comparison; observations persist. The UI was
+redesigned and the WNTR cross-check added. Full details are in [RESEARCH_AND_REDESIGN.md](RESEARCH_AND_REDESIGN.md).
+
+**Test evidence (18 Oct):** 49 core tests + 3 WNTR benchmark tests pass against FalkorDB, with 0 skipped in this
+environment (WNTR installed).

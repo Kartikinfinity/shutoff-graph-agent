@@ -37,8 +37,12 @@ database with `CALL algo.WCC(...)` and `CALL algo.SPpaths(...)`, in a few millis
 2. **Boundary valves**: every valve touching that component. Those are the valves to close.
 3. **Simulation**: copy the whole graph (`GRAPH.COPY`, about 10–70 ms), delete the valves we plan to close, run WCC again. Any component without a `Source` is dry. Then `algo.SPpaths` from each source to the break (should find nothing) and to each critical customer (should find a path, which is the proof).
 
-The copy matters because **planning never touches the real network graph**. Only an approved work
-order changes the live graph.
+The copy matters because **planning never touches the real network graph**. Only two things change
+the live graph:
+- a crew *observation* ("Crew reports V-265 is seized"), which saves a valve condition;
+- an approved work order (or a restore).
+
+Questions and what-ifs never change it.
 
 ## 5. What the "agent" part is
 
@@ -66,7 +70,7 @@ order changes the live graph.
 
 - **"Why not just compute this in Python?"** The network and its state live in FalkorDB. WCC and shortest paths run in the database, and every change (seized valve, closed valve) is a graph write that the next query sees. The UI, the MCP server and tests all share that single source of truth. We do cross-check WCC against a Python union-find, but only as a *test*.
 - **"Is this real hydraulics?"** No. It is connectivity. It tells you whether water *can* reach a place, not at what pressure. Utilities would pair it with a hydraulic model. Say so plainly.
-- **"How is this different from Blast Radius?"** Blast Radius *reads* an existing dependency graph. ShutOff *decides an intervention*, tests it on a copy, checks safety conditions, writes the change after approval, and re-plans when a crew reports a failure.
+- **"How is this different from Blast Radius?"** Blast Radius traverses a dependency graph to answer impact questions and stores `Finding` memory nodes. ShutOff *decides an intervention*: it tests it on a copy, checks post-conditions, records the change only after approval, and re-plans when a crew reports a failure.
 - **"What stops the AI from doing something dangerous?"** It has no tool to close valves. A human approves, and the server re-verifies before writing: same impact as shown, no seized valves, the break really isolated, critical customers explicitly acknowledged.
 - **"Is the dialysis patient protected?"** Be precise: the network has no other path to Willow Ct, so no valve plan can keep it supplied once V-265 fails. ShutOff *predicts* the risk before it happens, flags it, forces an explicit acknowledgement, and records a priority notice (simulated). It does not magically protect it.
 - **"What did you build vs. the AI?"** Answer honestly using `docs/AI_DISCLOSURE.md`.
@@ -83,4 +87,5 @@ order changes the live graph.
 | `shutoff/agent.py` | Offline planner, Claude tool loop, reply check |
 | `shutoff/api.py`, `web/` | Web app |
 | `shutoff/mcp_server.py` | MCP server |
-| `tests/` | 40 tests |
+| `tests/` | 49 core tests + 3 optional WNTR benchmark tests |
+| `benchmarks/wntr_crosscheck.py` | Compares ShutOff's segment query with WNTR on public EPANET networks |
