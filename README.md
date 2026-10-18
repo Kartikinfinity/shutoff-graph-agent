@@ -8,6 +8,10 @@ plans, exposes the connectivity evidence behind them, and updates the graph stat
 human actions. ShutOff predicts critical-customer outages. Physical valve operation, hydraulic adequacy
 (pressure and flow) and external dispatch are outside this prototype.
 
+**Demo video (3:01, narrated, with captions):** [demo/shutoff-demo.mp4](demo/shutoff-demo.mp4) · captions [demo/shutoff-demo.srt](demo/shutoff-demo.srt)
+
+**Quick start:** `docker compose up -d`, then open http://localhost:8080 (details in [Run it locally](#run-it-locally)).
+
 ![Re-planned after a crew reports a seized valve](docs/screenshots/light-4-plan-b-observed.png)
 
 ## The problem
@@ -206,11 +210,18 @@ ORDER BY hops LIMIT 1
 
 ## Run it locally
 
-Requires Docker and Python 3.12 (tested with 3.12.0). No API key is needed.
+No API key is needed. There is no hosted deployment (see Limitations), so the app runs on your machine.
 
-Start FalkorDB (database on :6379, FalkorDB Browser on :3000):
+**One command (Docker only).** This starts FalkorDB (:6379, FalkorDB Browser on :3000) and the ShutOff app,
+which seeds the synthetic network on first start:
 ```bash
 docker compose up -d
+```
+Then open http://localhost:8080. Verified on 18 Oct 2026: the containerised app answered `/api/health` and returned the 4-valve plan.
+
+**For development and tests** (Python 3.12, tested with 3.12.0). Start FalkorDB only:
+```bash
+docker compose up -d falkordb
 ```
 Create the environment and install dependencies:
 ```bash
@@ -248,20 +259,35 @@ Optional: add the WNTR cross-check tests (3 more):
 .venv/Scripts/python -m pip install -r requirements-benchmark.txt
 ```
 
-The core suite has 50 tests. Integration tests are skipped when FalkorDB is unreachable, so check that nothing is skipped except the optional benchmark module (which needs WNTR). They cover:
+The core suite has 51 tests. Integration tests are skipped when FalkorDB is unreachable, so check that nothing is skipped except the optional benchmark module (which needs WNTR). They cover:
 - the union-find cross-check;
 - the Plan A / Plan B / crew-plan numbers, and leak paths made of real pipe links;
 - copies never changing the live graph;
 - every approval and restore safeguard above, including stale plans, wrong revisions, missing acknowledgements, negated or question-form commands, and restore holds;
 - impact attribution;
 - `GRAPH.COPY` under background-save fork contention;
-- the HTTP API and the MCP gating;
+- the HTTP API and the MCP gating, including a real MCP stdio session (the server runs as a subprocess and a client calls its tools);
 - the model loop with a **mocked** client.
 
-## Demo (video about 75 seconds)
+## Demo video (3:01)
 
-`demo/shutoff-demo.webm` is recorded by [`demo/record_demo.py`](demo/record_demo.py) with Playwright, through the real UI,
-against FalkorDB. Captions are overlays. To rehearse it yourself (click *Reset demo* first):
+[`demo/shutoff-demo.mp4`](demo/shutoff-demo.mp4) (1920×1080, H.264/AAC) follows one incident through the real UI and FalkorDB. Captions are burned in, and a separate [`.srt`](demo/shutoff-demo.srt) is included.
+
+**How it was made** ([`demo/produce_video.py`](demo/produce_video.py)):
+- Playwright drives and records the running app; the zooms use the app's own Fit-incident control or a CSS zoom of the workspace.
+- The narration is synthesized offline with [Piper](https://github.com/rhasspy/piper) using the `en_GB-cori-high` voice, which is trained on public-domain LibriVox recordings. It is a synthetic voice, not an imitation of any real person.
+- Every line containing a negation is speech-recognised after synthesis and re-synthesized if the negation isn't clearly heard.
+- ffmpeg muxes the result at −16 LUFS.
+
+**Objective checks** ([`demo/verify_video.py`](demo/verify_video.py)):
+- the file decodes with no errors;
+- loudness is −16.1 LUFS, true peak −1.3 dBFS;
+- every caption appears 0.01–0.06 s before its line is spoken;
+- a local speech recognizer (faster-whisper `base.en`) hears 88% of the script's words in order, and the misses are number formatting or homophones.
+
+A person has not listened to it on this machine; watch it once before submitting. Tools for regenerating it: `requirements-demo.txt`.
+
+To rehearse the same story yourself (click *Reset demo* first):
 
 1. **Report a break on Maple St** gives plan IR1-r1: 4 valves, 34 accounts, no critical cut-off. The rail's *Risk to watch* says that if V-265 (unknown since 2011) cannot close, the dialysis account is cut off.
 2. *Crew proposes V-212 + V-213* is rejected; the purple path shows how the reservoir still reaches the break.
@@ -281,10 +307,11 @@ against FalkorDB. Captions are overlays. To rehearse it yourself (click *Reset d
 
 ## Limitations
 
+- **No live deployment.** Hosting needs accounts and credentials that the authors must set up; the one-command Docker route above is the supported way to run it.
 - **Connectivity, not hydraulics.** No pressure, flow, pressure zones, check valves or PRVs. Pair it with EPANET for real use.
 - **Synthetic demo network.** Segmentation is validated on public EPANET topologies (with generated valve locations); the full workflow runs only on Riverbend.
 - **Simulated outside world.** Work orders and notices are graph records only.
-- **One local operator.** There are no authenticated users, no atomic multi-step writes, no concurrency control and no hosted deployment. Sessions are in memory.
+- **One local operator.** There are no authenticated users, no atomic multi-step writes and no concurrency control. Sessions are in memory.
 - **Limited language.** The deterministic parser understands a limited set of phrasings. Claude mode is untested live.
 - The valve-exercise ranking is a transparent heuristic, not a calibrated risk model. A seized valve is treated as pass-through even when closed, which is conservative.
 

@@ -8,6 +8,26 @@ services:
       - "3000:3000"   # FalkorDB Browser UI
     volumes:
       - falkordb-data:/var/lib/falkordb/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # The ShutOff app. Open http://localhost:8080 (port 8080 so it does not clash
+  # with a local `uvicorn ... --port 8000` dev server).
+  app:
+    build: .
+    container_name: shutoff-app
+    depends_on:
+      falkordb:
+        condition: service_healthy
+    environment:
+      FALKORDB_HOST: falkordb
+      FALKORDB_PORT: "6379"
+    ports:
+      - "8080:8000"
     restart: unless-stopped
 
 volumes:

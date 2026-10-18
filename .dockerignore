@@ -1,0 +1,14 @@
+.git
+.venv
+.claude
+.pytest_cache
+**/__pycache__
+demo
+docs
+dist
+output
+tmp
+benchmarks
+tests
+*.md
+*.pdf

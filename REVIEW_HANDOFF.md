@@ -14,7 +14,7 @@ State of this baseline: 40/40 tests pass, the app starts, and the live Claude AP
 > - The UI was redesigned around the operator workflow.
 > - ShutOff's segment query was cross-checked against WNTR on public EPANET networks ([docs/BENCHMARK_WNTR.md](docs/BENCHMARK_WNTR.md)).
 >
-> Tests: 50 core + 3 optional benchmark tests. File list additions: `benchmarks/`, `tests/test_benchmark.py`,
+> Tests: 51 core + 3 optional benchmark tests. File list additions: `benchmarks/`, `tests/test_benchmark.py`,
 > `requirements-benchmark.txt`, `RESEARCH_AND_REDESIGN.md`.
 
 ---
@@ -209,7 +209,7 @@ Optional: set `ANTHROPIC_API_KEY` for Claude mode (unverified). `SHUTOFF_OFFLINE
 7. *Valves to exercise*: ranking from 96 simulated seized-valve scenarios (fewer once valves are closed or seized).
 8. *Restore* (work-order bar): valves re-opened after the sandbox check.
 
-The recorded walkthrough is `demo/shutoff-demo.webm` (~1:45, Playwright against the live app, captions overlaid by `demo/record_demo.py`).
+The recorded walkthrough is `demo/shutoff-demo.mp4` (3:01, narrated, burned-in captions plus `demo/shutoff-demo.srt`), produced by `demo/produce_video.py` with Playwright against the live app; `demo/verify_video.py` re-runs the objective checks. (The earlier captions-only `demo/shutoff-demo.webm` from `demo/record_demo.py` is superseded.)
 
 ---
 
@@ -233,4 +233,4 @@ The recorded walkthrough is `demo/shutoff-demo.webm` (~1:45, Playwright against 
 | 4 | `README.md`, `docs/EXPLAINER.md`, `OWNER_BRIEFING.md` | Product docs and plain-English explanation |
 | 4 | `docs/AI_DISCLOSURE.md`, `docs/SUBMISSION_CHECKLIST.md` | Disclosure (participant section pending), checklist |
 | 4 | `docker-compose.yml`, `requirements.txt` | Pinned FalkorDB image digest; pinned Python dependencies |
-| 4 | `demo/record_demo.py`, `demo/shoot.py`, `docs/screenshots/` | Demo capture scripts and screenshots |
+| 4 | `demo/produce_video.py`, `demo/verify_video.py`, `demo/record_demo.py`, `demo/shoot.py`, `docs/screenshots/` | Narrated video pipeline and checks, older capture scripts, screenshots |

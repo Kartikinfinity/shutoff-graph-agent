@@ -77,7 +77,7 @@ Be precise about the dialysis account: ShutOff can't keep it supplied once V-265
 there is no other pipe to Willow Ct. What it does is *predict* the risk before the valve fails, flag
 it, force an explicit acknowledgement, and record a priority notice (simulated).
 
-## What the tests actually prove (50 core tests + 3 optional benchmark tests, all passing)
+## What the tests actually prove (51 core tests + 3 optional benchmark tests, all passing)
 
 - **The algorithm is right.** For every one of the 53 pipes, FalkorDB's WCC answer matches an independent Python calculation. On three public EPANET networks (up to 964 nodes), ShutOff's segment query gives exactly the same segments as the US EPA's WNTR toolkit, including with seized valves (`docs/BENCHMARK_WNTR.md`).
 - **The demo numbers are real.** Plan A is 4 valves and 34 accounts. Plan B is 7 valves, 66 accounts, with the dialysis account cut off. The crew's 2-valve plan fails, and every step of the leak path is a real pipe connection.

@@ -1,0 +1,111 @@
+1
+00:00:03,935 --> 00:00:09,971
+When a water main breaks, someone has to decide, quickly, which valves to close.
+
+2
+00:00:10,185 --> 00:00:16,662
+It's harder than it sounds. Water networks are full of loops, and one stuck valve can make a shutdown much bigger.
+
+3
+00:00:16,888 --> 00:00:20,684
+Closing the wrong area can also cut off homes that are nowhere near the break.
+
+4
+00:00:20,888 --> 00:00:25,717
+ShutOff keeps the network as a graph in FalkorDB. This town is simulated.
+
+5
+00:00:25,935 --> 00:00:30,752
+A caller reports water gushing on Maple Street, between Second and Third Avenue.
+
+6
+00:00:30,966 --> 00:00:37,815
+ShutOff locates that pipe, then asks FalkorDB which pipes stay connected if every working valve acts as a wall.
+
+7
+00:00:38,060 --> 00:00:43,620
+That group is the smallest area that can be shut off. The four valves around it are the ones to close.
+
+8
+00:00:43,872 --> 00:00:48,260
+Before anything changes, ShutOff tests the plan on a copy of the graph.
+
+9
+00:00:48,482 --> 00:00:54,843
+The break is cut off from every source. 34 accounts lose water, and no critical customer is affected.
+
+10
+00:00:55,060 --> 00:01:01,712
+Each claim comes with a path from the graph: the hospital keeps a route from the tank, 14 connections long.
+
+11
+00:01:01,919 --> 00:01:08,292
+ShutOff also warns about a risk: valve V-265 has not been exercised since 2011.
+
+12
+00:01:08,513 --> 00:01:13,609
+The crew suggests closing only the two valves nearest the break. ShutOff checks that first.
+
+13
+00:01:13,825 --> 00:01:20,268
+It fails. The purple line is the path FalkorDB found: water still reaches the broken pipe from the reservoir.
+
+14
+00:01:20,482 --> 00:01:22,165
+Two valves are not enough.
+
+15
+00:01:22,685 --> 00:01:27,676
+What if valve V-265 cannot be closed? ShutOff has already worked that out.
+
+16
+00:01:27,903 --> 00:01:34,938
+This preview is hypothetical: seven valves, a dialysis account cut off, and nothing recorded.
+
+17
+00:01:35,153 --> 00:01:41,654
+Now the crew confirms that V-265 is seized. That is saved in the graph, and the plan is recalculated.
+
+18
+00:01:44,075 --> 00:01:50,193
+Seven valves now. 66 accounts lose water, and one critical customer is cut off.
+
+19
+00:01:50,403 --> 00:01:57,287
+It's a home-dialysis account on Willow Court: outside the shut-off area, but its only supply runs through it.
+
+20
+00:01:57,497 --> 00:02:03,731
+ShutOff never closes anything by itself. The supervisor must name the critical customer before approving.
+
+21
+00:02:03,966 --> 00:02:08,075
+The server then re-checks the plan, and refuses if anything has changed.
+
+22
+00:02:08,310 --> 00:02:14,451
+Approval records work order WO-1001 and marks the valves closed in the graph.
+
+23
+00:02:14,653 --> 00:02:19,192
+This is a simulation: no crew is dispatched, and nothing is sent to anyone.
+
+24
+00:02:19,716 --> 00:02:25,938
+So, why use a graph database? Every decision here is a question about what is connected to what.
+
+25
+00:02:26,153 --> 00:02:35,080
+In FalkorDB, that's a direct question: components find the area, a graph copy tests the plan, shortest paths show the proof.
+
+26
+00:02:35,294 --> 00:02:44,175
+We also checked the segmentation against the U.S. EPA's WNTR toolkit on public networks. It matched exactly.
+
+27
+00:02:44,388 --> 00:02:50,018
+ShutOff models connectivity, not water pressure, and it doesn't control real valves.
+
+28
+00:02:50,247 --> 00:02:54,577
+Within those limits, every recommendation it makes is checked and explained.

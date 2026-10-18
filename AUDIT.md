@@ -34,7 +34,7 @@ Priority key: P0 = submission blocker or safety bug, P1 = materially wrong or mi
 | R1 | Public source repository | **FAIL** | Only a local git repo exists (`832a626`); no GitHub remote; `gh` CLI not installed | Hard requirement | You create a public GitHub repo and push (**P0, user**) |
 | R2 | README with setup + graph model | PASS | `README.md` "Run it locally", "Graph model" | — | Re-check after fixes |
 | R3 | Cypher / algorithms documented | PASS | README "Cypher and algorithms…", `shutoff/queries.py` | — | — |
-| R4 | Demo video | PARTIAL | `demo/shutoff-demo.webm` (1:42, recorded against the live app) exists locally; not uploaded; becomes outdated once the approval flow is fixed | Required | Re-record after fixes (P1, me); upload and link (**P0, user**) |
+| R4 | Demo video | MET (18 Oct) | `demo/shutoff-demo.mp4` (3:01, narrated, captions + `.srt`) recorded against the live app after the fixes and committed to the repo; objective checks in `demo/verify_video.py` | Required | Optional: also upload to YouTube/Drive for the form link (**user**) |
 | R5 | Deployment or local setup | PARTIAL | Local setup only (rules allow this with a video) | Deployment is "preferred" | Optional; skip unless time remains (P3) |
 | R6 | Track named in submission | UNVERIFIED | Submission form | Required | Select Track 1 in the form (**P0, user**) |
 | R7 | FalkorDB primary and central | PASS | No other database. Segments (`SEGMENT_OF_PIPE`, `algo.WCC`), impact (`SIM_DRY_PIPES`), proof paths (`algo.SPpaths`), plan validation and ranking all run as graph queries (§2) | Core of judging per the official guide | — |
@@ -162,5 +162,5 @@ Wording and claims were corrected in the UI, the replies and the docs: simulated
 pressure"; "valves to close" with no implied sequence; the Blast Radius comparison; observations persist. The UI was
 redesigned and the WNTR cross-check added. Full details are in [RESEARCH_AND_REDESIGN.md](RESEARCH_AND_REDESIGN.md).
 
-**Test evidence (18 Oct):** 50 core tests + 3 WNTR benchmark tests pass against FalkorDB, with 0 skipped in this
+**Test evidence (18 Oct):** 51 core tests + 3 WNTR benchmark tests pass against FalkorDB, with 0 skipped in this
 environment (WNTR installed).

@@ -5,7 +5,7 @@ Required by Rule 10:
 - [ ] **Public source-code repository** (GitHub). Push this folder; make sure `.venv/` is not committed.
 - [x] **README with setup instructions and the graph data model** (`README.md`)
 - [x] **Cypher queries / graph algorithms the product depends on** (README section + `shutoff/queries.py`)
-- [ ] **Demo video showing the working project** (`demo/shutoff-demo.webm`, upload to YouTube unlisted or Drive and link it)
+- [x] **Demo video showing the working project**: `demo/shutoff-demo.mp4` (3:01, narrated, captions in `demo/shutoff-demo.srt`), committed to the repo. Optional: also upload to YouTube (unlisted) and use that link in the form
 - [x] **Local setup instructions** (README "Run it locally"); live deployment optional
 - [ ] **Track named in the submission form:** *Agents That Act on Connected Data*
 
@@ -20,7 +20,7 @@ Rules to double-check:
 
 Before you submit:
 
-- [ ] `docker compose up -d`, `python -m shutoff.seed`, `python -m pytest -q` (50 core tests; +3 if WNTR is installed) all pass on your machine, with no integration tests skipped
+- [ ] `docker compose up -d`, `python -m shutoff.seed`, `python -m pytest -q` (51 core tests; +3 if WNTR is installed) all pass on your machine, with no integration tests skipped
 - [ ] Run the demo once yourself in the browser (http://localhost:8000)
 - [ ] Watch the demo video end to end
 - [ ] Optional: blog post for the AirPods side prize (write it in your own words)

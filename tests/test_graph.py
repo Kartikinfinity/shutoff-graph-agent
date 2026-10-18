@@ -560,3 +560,35 @@ def test_break_already_isolated_by_an_active_work_order_has_nothing_to_approve(f
     assert plan["close"] == [] and plan["simulation"]["isolated"] is True
     assert r["proposal"] is None and "nothing to approve" in r["reply"]
     assert agent.approve("again")["steps"] == []
+
+
+def test_mcp_server_over_real_stdio_transport(fresh):
+    """Spawn the MCP server as a subprocess and talk to it over stdio, as an MCP client (e.g. Claude Desktop) would."""
+    import asyncio
+    import json
+    import os
+    import sys
+    from pathlib import Path
+
+    from mcp.client.session import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    env = {k: os.environ[k] for k in ("SHUTOFF_GRAPH", "FALKORDB_HOST", "FALKORDB_PORT", "SYSTEMROOT", "PATH") if k in os.environ}
+    params = StdioServerParameters(command=sys.executable, args=["-m", "shutoff.mcp_server"],
+                                   cwd=str(Path(__file__).resolve().parent.parent), env=env)
+
+    async def go():
+        async with stdio_client(params) as streams:
+            async with ClientSession(*streams[:2]) as s:
+                await s.initialize()
+                names = {t.name for t in (await s.list_tools()).tools}
+                assert names == set(T.TOOLS)
+                r = await s.call_tool("check_closure_plan", {"pipe_id": "P-107", "valve_ids": ["V-212", "V-213"]})
+                sim = json.loads(r.content[0].text)["simulation"]
+                assert sim["isolated"] is False and sim["leak_path"]["path"][-1] == "P-107"
+                r = await s.call_tool("issue_work_order", {"pipe_id": "P-107", "valve_ids": PLAN_A,
+                                                           "confirmed_by_human": False, "expected_accounts_out": 34})
+                assert json.loads(r.content[0].text)["outcome"] == "refused"
+
+    asyncio.run(go())
+    assert N.open_work_orders() == []

@@ -1,0 +1,5 @@
+# Optional: regenerate the narrated demo video (demo/produce_video.py) and verify it (demo/verify_video.py)
+playwright==1.49.1
+piper-tts==1.8.0
+imageio-ffmpeg==0.6.0
+faster-whisper==1.2.1

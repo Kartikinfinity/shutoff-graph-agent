@@ -11,3 +11,5 @@ Past WeMakeDevs Hackathons & Winning Projects.pdf
 dist/
 output/
 tmp/
+demo/build/
+*.mp4.tmp

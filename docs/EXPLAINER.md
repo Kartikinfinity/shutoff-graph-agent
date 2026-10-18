@@ -87,5 +87,5 @@ Questions and what-ifs never change it.
 | `shutoff/agent.py` | Offline planner, Claude tool loop, reply check |
 | `shutoff/api.py`, `web/` | Web app |
 | `shutoff/mcp_server.py` | MCP server |
-| `tests/` | 50 core tests + 3 optional WNTR benchmark tests |
+| `tests/` | 51 core tests + 3 optional WNTR benchmark tests |
 | `benchmarks/wntr_crosscheck.py` | Compares ShutOff's segment query with WNTR on public EPANET networks |
